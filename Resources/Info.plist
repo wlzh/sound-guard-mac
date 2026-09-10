@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>SoundGuard</string>
+<key>CFBundleIdentifier</key><string>uk.869hr.SoundGuard</string>
+<key>CFBundleName</key><string>Sound Guard</string>
+<key>CFBundleDisplayName</key><string>声音守卫</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>14.2</string>
+<key>LSUIElement</key><true/>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAudioCaptureUsageDescription</key><string>仅在开启静音流检测且受保护设备音量非零时分析系统音频是否全零，不录音、不保存、不上传。</string>
+<key>NSHumanReadableCopyright</key><string>Copyright © 2026 wlzh. MIT License.</string>
+</dict></plist>
