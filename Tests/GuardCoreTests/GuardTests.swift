@@ -264,6 +264,13 @@ final class ControllerTests: XCTestCase {
 }
 
 final class MeterTests: XCTestCase {
+    func testTapConfigurationDoesNotMuteOrCaptureMicrophone() {
+        let description = TapConfiguration.description(deviceUID: "synthetic-output-uid")
+        XCTAssertEqual(description.deviceUID, "synthetic-output-uid")
+        XCTAssertTrue(description.isExclusive); XCTAssertTrue(description.isPrivate)
+        XCTAssertTrue(description.processes.isEmpty)
+        XCTAssertEqual(description.muteBehavior, .unmuted)
+    }
     func testSignalStartupGrace() throws {
         var health = SignalHealth(started: 1)
         XCTAssertEqual(try health.evaluate(now: 100, buffer: 0, sound: 0, invalid: false), .playing)
@@ -346,7 +353,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("never restore", controllerTests.testRestorePlaybackNeverWritesNonzero), ("external selection", controllerTests.testSelectedExternalGetsProtectionAndUnselectStops),
         ("unknown playback", controllerTests.testUnknownPlaybackCancels)
     ]),
-    (meterTests, [("signal startup", meterTests.testSignalStartupGrace), ("signal absent", meterTests.testSignalMissingCallbacksFail),
+    (meterTests, [("tap configuration", meterTests.testTapConfigurationDoesNotMuteOrCaptureMicrophone),
+                  ("signal startup", meterTests.testSignalStartupGrace), ("signal absent", meterTests.testSignalMissingCallbacksFail),
                   ("signal stale", meterTests.testSignalStaleCallbacksFail), ("signal silence", meterTests.testSignalDigitalSilenceTransitions),
                   ("signal delayed poll", meterTests.testSignalShortSoundRetainedAcrossDelayedPoll), ("signal corrupt", meterTests.testSignalInvalidClockAndSamplesFail),
                   ("digital silence", meterTests.testDigitalSilence), ("quiet sound", meterTests.testQuietSoundIsNotSilence),

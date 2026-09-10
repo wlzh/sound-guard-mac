@@ -3,6 +3,18 @@ import Foundation
 import GuardCore
 import SignalMeter
 
+public enum TapConfiguration {
+    public static func description(deviceUID: String) -> CATapDescription {
+        // The processes initializer is available in older SDKs; exclusive=true means exclude this (empty) list.
+        let description = CATapDescription(processes: [], deviceUID: deviceUID, stream: 0)
+        description.isExclusive = true
+        description.name = "Sound Guard signal observer"
+        description.isPrivate = true
+        description.muteBehavior = .unmuted
+        return description
+    }
+}
+
 final class SignalTap {
     private var tap: AudioObjectID = 0
     private var aggregate: AudioObjectID = 0
@@ -17,10 +29,7 @@ final class SignalTap {
         do {
             let streams = try Property(device.id, kAudioDevicePropertyStreams, kAudioDevicePropertyScopeOutput).array()
             guard streams.count == 1 else { throw GuardError("静音流检测暂不支持多输出流设备") }
-            let description = CATapDescription(excludingProcesses: [], deviceUID: device.uid, stream: 0)
-            description.name = "Sound Guard signal observer"
-            description.isPrivate = true
-            description.muteBehavior = .unmuted
+            let description = TapConfiguration.description(deviceUID: device.uid)
             try check(AudioHardwareCreateProcessTap(description, &tap), "创建系统音频检测；请检查系统音频录制权限")
             let format = try Property(tap, kAudioTapPropertyFormat).scalar(AudioStreamBasicDescription())
             guard format.mFormatID == kAudioFormatLinearPCM,
