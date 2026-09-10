@@ -1,0 +1,15 @@
+name: macOS checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests, build and documentation
+        run: zsh scripts/test-all.sh
+      - name: Universal app and signature
+        run: zsh scripts/build-app.sh
