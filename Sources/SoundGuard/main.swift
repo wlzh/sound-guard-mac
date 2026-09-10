@@ -24,6 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var observers: [NSObjectProtocol] = []
     var lockFD: Int32 = -1
     var statusObserver: NSObjectProtocol?
+    var selectedSettingsPage = 0
+    var settingsFeedback: NSTextField?
+    var previewDevices: [OutputDevice]?
+    var previewCurrent: OutputDevice?
+    var previewState: GuardState?
+    var displayDevice: OutputDevice? { previewCurrent ?? controller.device }
+    var displayState: GuardState { previewState ?? controller.state }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("uk.869hr.SoundGuard")
@@ -33,8 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { NSApp.terminate(nil); return }
         NSApp.setActivationPolicy(.accessory)
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        status.button?.image = NSImage(systemSymbolName: "speaker.badge.shield.checkmark", accessibilityDescription: "声音守卫")
-            ?? NSImage(systemSymbolName: "speaker.wave.2", accessibilityDescription: "声音守卫")
+        status.button?.image = BrandAssets.mark()
+        status.button?.setAccessibilityLabel("声音守卫：声波盾牌")
         let menu = NSMenu(); menu.delegate = self; status.menu = menu
         controller.onUpdate = { [weak self] in self?.updateStatus() }
         let center = NSWorkspace.shared.notificationCenter
@@ -85,31 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .fault(let message): return "保护异常：" + message
         }
     }
-    func menuWillOpen(_ menu: NSMenu) {
-        menu.removeAllItems()
-        label("声音守卫 · " + AppVersion.current, in: menu)
-        label(stateText, in: menu)
-        if let device = controller.device {
-            label(device.name + (device.controllable ? " · 音量 \(Int(device.volume * 100))%" : " · 不可调节"), in: menu)
-        }
-        label(controller.lastAction, in: menu)
-        menu.addItem(.separator())
-        item(controller.preferences.enabled ? "暂停保护" : "恢复保护", #selector(toggleEnabled), in: menu)
-        let zero = item("立即将当前受保护设备归零", #selector(zeroNow), in: menu)
-        zero.isEnabled = controller.device.map { controller.preferences.includes($0) && $0.controllable } ?? false
-        item("重新核对 / 重试", #selector(retry), in: menu)
-        item("设置与设备选择…", #selector(showSettings), in: menu, key: ",")
-        menu.addItem(.separator())
-        item("关于声音守卫…", #selector(showAbout), in: menu)
-        item("使用说明", #selector(openGuide), in: menu)
-        item("退出声音守卫", #selector(quit), in: menu, key: "q")
-    }
-    func label(_ text: String, in menu: NSMenu) {
-        let entry = NSMenuItem(title: text, action: nil, keyEquivalent: ""); entry.isEnabled = false; menu.addItem(entry)
-    }
-    @discardableResult func item(_ title: String, _ action: Selector, in menu: NSMenu, key: String = "") -> NSMenuItem {
-        let entry = NSMenuItem(title: title, action: action, keyEquivalent: key); entry.target = self; menu.addItem(entry); return entry
-    }
     func save(_ p: Preferences) {
         defaults.set(try? JSONEncoder().encode(p), forKey: "preferences.v1"); controller.configure(p)
     }
@@ -122,11 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
            FileManager.default.fileExists(atPath: resource.path) { NSWorkspace.shared.open(resource) }
         else { NSWorkspace.shared.open(URL(string: repository + "/blob/main/docs/USER_GUIDE.md")!) }
     }
-    func text(_ value: String, bold: Bool = false) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: value)
-        label.font = bold ? .boldSystemFont(ofSize: 14) : .systemFont(ofSize: 12)
-        label.maximumNumberOfLines = 0; return label
-    }
     func checkbox(_ title: String, on: Bool, action: Selector) -> NSButton {
         let button = NSButton(checkboxWithTitle: title, target: self, action: action)
         button.state = on ? .on : .off; return button
@@ -138,77 +115,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        if window === settings { settings = nil; minutesField = nil; deviceButtons.removeAll(); deviceNames.removeAll() }
+        if window === settings { settings = nil; minutesField = nil; settingsFeedback = nil; deviceButtons.removeAll(); deviceNames.removeAll() }
         if window === about { about = nil }
     }
     func present(_ window: NSWindow) { NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil) }
-    @objc func showSettings() {
-        if settings == nil { settings = window("声音守卫 · 设置", width: 540, height: 630) }
-        rebuildSettings(); present(settings!)
-    }
-    func rebuildSettings() {
-        guard let window = settings else { return }
-        deviceButtons.removeAll(); deviceNames.removeAll()
-        let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
-        stack.edgeInsets = NSEdgeInsets(top: 22, left: 24, bottom: 22, right: 24)
-        stack.addArrangedSubview(text("仅自动关小，不自动打开", bold: true))
-        stack.addArrangedSubview(text("当前状态：" + stateText))
-        stack.addArrangedSubview(checkbox("启用自动归零保护", on: controller.preferences.enabled, action: #selector(changeEnabled(_:))))
-        let row = NSStackView(); row.orientation = .horizontal; row.spacing = 8
-        row.addArrangedSubview(text("连续空闲"))
-        let field = NSTextField(string: String(controller.preferences.minutes)); field.widthAnchor.constraint(equalToConstant: 55).isActive = true
-        minutesField = field; row.addArrangedSubview(field); row.addArrangedSubview(text("分钟后归零（1–120）"))
-        row.addArrangedSubview(NSButton(title: "应用", target: self, action: #selector(applyMinutes)))
-        stack.addArrangedSubview(row)
-        stack.addArrangedSubview(checkbox("静音流也计时（进阶检测）", on: controller.preferences.detectSilentStream, action: #selector(changeSignal(_:))))
-        stack.addArrangedSubview(text("默认关闭。两种模式都会在非零音量时检测播放。开启后额外读取系统音频信号，仅全零样本算静音；不使用麦克风、不录音、不上传。"))
-        stack.addArrangedSubview(text("保护设备", bold: true))
-        stack.addArrangedSubview(checkbox("系统内建扬声器", on: controller.preferences.protectBuiltIn, action: #selector(changeBuiltIn(_:))))
-        stack.addArrangedSubview(text("其他设备默认不保护。勾选后，仅当它成为系统默认输出时生效；不修改闲置设备音量。插孔或设备身份变化需要重新选择。"))
-        var seen = Set<String>()
-        do {
-            for device in try audio.devices() where !device.builtInSpeaker {
-                seen.insert(device.selectionID); deviceNames[device.selectionID] = device.name
-                let button = checkbox(device.name + (device.controllable ? "" : "（不支持音量控制）"),
-                    on: controller.preferences.selectedDevices[device.selectionID] != nil, action: #selector(changeDevice(_:)))
-                button.isEnabled = device.controllable || controller.preferences.selectedDevices[device.selectionID] != nil
-                deviceButtons[button] = device.selectionID; stack.addArrangedSubview(button)
-            }
-            for (key, name) in controller.preferences.selectedDevices.sorted(by: { $0.value < $1.value }) where !seen.contains(key) {
-                deviceNames[key] = name
-                let button = checkbox(name + "（离线 / 路由变化，取消勾选可移除）", on: true, action: #selector(changeDevice(_:)))
-                deviceButtons[button] = key; stack.addArrangedSubview(button)
-            }
-        } catch { stack.addArrangedSubview(text("设备列表读取失败：" + error.localizedDescription)) }
-        stack.addArrangedSubview(NSButton(title: "刷新设备列表", target: self, action: #selector(refreshSettings)))
-        let login = SMAppService.mainApp.status
-        stack.addArrangedSubview(checkbox("登录时启动", on: login == .enabled, action: #selector(changeLogin(_:))))
-        if login == .requiresApproval { stack.addArrangedSubview(text("登录启动待批准，请前往系统设置 → 通用 → 登录项。")) }
-        let scroll = NSScrollView(frame: window.contentView!.bounds); scroll.hasVerticalScroller = true
-        scroll.autoresizingMask = [.width, .height]; scroll.drawsBackground = true
-        scroll.backgroundColor = .windowBackgroundColor
-        let document = SettingsDocument(frame: scroll.contentView.bounds)
-        stack.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: document.topAnchor)
-        ])
-        scroll.documentView = document
-        document.layoutSubtreeIfNeeded()
-        document.setFrameSize(NSSize(width: scroll.contentSize.width, height: max(scroll.contentSize.height, stack.fittingSize.height)))
-        window.contentView = scroll
-    }
-    @objc func refreshSettings() { controller.retry(); rebuildSettings() }
-    @objc func changeEnabled(_ sender: NSButton) { var p = controller.preferences; p.enabled = sender.state == .on; save(p) }
-    @objc func changeBuiltIn(_ sender: NSButton) { var p = controller.preferences; p.protectBuiltIn = sender.state == .on; save(p) }
+    @objc func refreshSettings() { rebuildSettings() }
+    @objc func changeEnabled(_ sender: NSSwitch) { var p = controller.preferences; p.enabled = sender.state == .on; save(p) }
+    @objc func changeBuiltIn(_ sender: NSSwitch) { var p = controller.preferences; p.protectBuiltIn = sender.state == .on; save(p) }
     @objc func changeDevice(_ sender: NSButton) {
         guard let key = deviceButtons[sender] else { return }
         var p = controller.preferences
         p.selectedDevices[key] = sender.state == .on ? deviceNames[key] : nil
         save(p)
     }
-    @objc func changeSignal(_ sender: NSButton) {
+    @objc func changeSignal(_ sender: NSSwitch) {
         if sender.state == .on {
             let alert = NSAlert(); alert.messageText = "开启静音流检测？"
             alert.informativeText = "会在受保护设备音量非零时读取系统音频信号，可能出现系统音频录制权限提示。不保存音频；开启后 CPU 开销会增加。权限拒绝或检测异常会暂停保护，可关闭此选项恢复默认模式。"
@@ -222,8 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             showError("请输入 1–120 的整数分钟数"); return
         }
         var p = controller.preferences; p.minutes = value; save(p)
+        settingsFeedback?.stringValue = "已保存，空闲计时已重新开始。"
     }
-    @objc func changeLogin(_ sender: NSButton) {
+    @objc func changeLogin(_ sender: NSSwitch) {
         do {
             if sender.state == .on { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
@@ -231,35 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         rebuildSettings()
     }
     func showError(_ message: String) { let alert = NSAlert(); alert.messageText = message; alert.runModal() }
-    @objc func showAbout() {
-        if about == nil {
-            about = window("关于声音守卫", width: 540, height: 450)
-            let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
-            stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
-            stack.addArrangedSubview(text("Sound Guard · 声音守卫", bold: true))
-            stack.addArrangedSubview(text("版本 \(AppVersion.current)（build \(AppVersion.build)） · 开发预览"))
-            stack.addArrangedSubview(text("只负责将空闲输出归零，绝不自动恢复音量。\nCopyright © 2026 wlzh · MIT License"))
-            let row = NSStackView(); row.orientation = .horizontal
-            for (title, action) in [("作者", #selector(openAuthor)), ("网站", #selector(openWebsite)),
-                                    ("GitHub", #selector(openRepository)), ("文档", #selector(openGuide))] {
-                row.addArrangedSubview(NSButton(title: title, target: self, action: action))
-            }
-            stack.addArrangedSubview(row)
-            let licenseURL = Bundle.main.resourceURL?.appendingPathComponent("LICENSE")
-            let license = licenseURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "MIT License · Copyright (c) 2026 wlzh\n完整许可证见源码 LICENSE。"
-            let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
-            let view = NSTextView(); view.isEditable = false; view.string = license
-            view.font = .monospacedSystemFont(ofSize: 10, weight: .regular); view.textContainerInset = NSSize(width: 8, height: 8)
-            view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-            view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
-            scroll.documentView = view; stack.addArrangedSubview(scroll)
-            scroll.heightAnchor.constraint(equalToConstant: 220).isActive = true
-            scroll.widthAnchor.constraint(equalToConstant: 492).isActive = true
-            stack.frame = about!.contentView!.bounds; stack.autoresizingMask = [.width, .height]; about!.contentView = stack
-        }
-        present(about!)
-    }
-    @objc func openAuthor() { NSWorkspace.shared.open(URL(string: "https://github.com/wlzh")!) }
+    @objc func openAuthor() { NSWorkspace.shared.open(URL(string: "https://x.com/wlzh")!) }
     @objc func openWebsite() { NSWorkspace.shared.open(URL(string: "https://869hr.uk")!) }
     @objc func openRepository() { NSWorkspace.shared.open(URL(string: repository)!) }
 }
@@ -333,32 +226,9 @@ if CommandLine.arguments.contains("--status") {
         print(String(data: try JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]), encoding: .utf8)!)
     } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
 } else if CommandLine.arguments.contains("--self-test-ui") {
-    _ = NSApplication.shared
-    NSApp.appearance = NSAppearance(named: .aqua)
-    let delegate = AppDelegate()
-    delegate.settings = delegate.window("Settings test", width: 540, height: 630)
-    delegate.rebuildSettings()
-    precondition(delegate.minutesField?.stringValue == String(delegate.controller.preferences.minutes))
-    delegate.showAbout()
-    precondition(delegate.about?.contentView?.subviews.isEmpty == false)
-    if let index = CommandLine.arguments.firstIndex(of: "--render-previews"), CommandLine.arguments.count > index + 1 {
-        let directory = URL(fileURLWithPath: CommandLine.arguments[index + 1])
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for (name, window) in [("settings", delegate.settings), ("about", delegate.about)] {
-            if let view = window?.contentView {
-                view.wantsLayer = true
-                view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-                view.layoutSubtreeIfNeeded()
-                if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
-                    view.cacheDisplay(in: view.bounds, to: bitmap)
-                    try bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent(name + ".png"))
-                }
-            }
-        }
-    }
-    delegate.about?.close(); delegate.settings?.close()
-    precondition(delegate.about == nil && delegate.settings == nil)
-    print("UI_CONSTRUCTION=PASS; VISIBLE_LAYOUT=MANUAL_CHECK_REQUIRED")
+    let index = CommandLine.arguments.firstIndex(of: "--render-previews")
+    let output = index.flatMap { CommandLine.arguments.count > $0 + 1 ? URL(fileURLWithPath: CommandLine.arguments[$0 + 1]) : nil }
+    try runUIChecks(outputDirectory: output)
 } else {
     let app = NSApplication.shared
     let delegate = AppDelegate(); app.delegate = delegate
