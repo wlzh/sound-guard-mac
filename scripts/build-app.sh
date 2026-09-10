@@ -9,6 +9,7 @@ swift build -c release --product SoundGuard --triple x86_64-apple-macosx14.2
 INTEL="$(swift build -c release --triple x86_64-apple-macosx14.2 --show-bin-path)"
 lipo -create "$ARM/SoundGuard" "$INTEL/SoundGuard" -output "$APP/Contents/MacOS/SoundGuard"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/BrandMark.svg Resources/AppIcon.svg "$APP/Contents/Resources/"
 swift scripts/make-icon.swift "$PWD/dist/AppIcon.iconset"
 iconutil -c icns "$PWD/dist/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP/Contents/Resources/LICENSE"

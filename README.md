@@ -2,7 +2,7 @@
 
 面向 macOS 的声音管理 App：输出音量开启后，长时间没有播放活动便自动把系统输出音量设为 0，绝不自动恢复音量。
 
-**v0.1.0 / build 1：开发预览。** 已实现原生 App、两种检测模式、设备白名单、设置与关于。尚未完成全部设备与长期性能验收，具体证据及限制见[测试报告](docs/TESTING.md)，不将构建成功当作全部实机通过。
+**v0.2.0 / build 2：开发预览。** 已实现原生 App、两种检测模式、设备白名单、设置与关于。尚未完成全部设备与长期性能验收，具体证据及限制见[测试报告](docs/TESTING.md)，不将构建成功当作全部实机通过。
 
 ## 功能
 
@@ -19,7 +19,7 @@
 
 ## 文档与检查
 
-- [v0.1.0 产品需求与验收清单](docs/prd/v0.1.0/prd.md)
+- [v0.2.0 产品需求与验收清单](docs/prd/v0.2.0/prd.md)
 - [文档索引及交付状态](docs/README.md)
 - [测试状态与发布门禁](docs/TESTING.md)
 - [贡献说明](CONTRIBUTING.md)、[安全说明](SECURITY.md)、[版本记录](CHANGELOG.md)
@@ -37,6 +37,16 @@ open "dist/Sound Guard.app"
 ## 作者与许可
 
 作者：[wlzh](https://github.com/wlzh)。网站：[869hr.uk](https://869hr.uk)。
-分发包由 `zsh scripts/package-release.sh` 生成 Universal ZIP 和 SHA256。当前仅 ad-hoc 签名、未公证；安装和系统拦截处理见[安装指南](docs/INSTALL.md)。私有 Release 只有获授权账号可访问。
+分发包由 `zsh scripts/package-release.sh` 生成 Universal ZIP 和 SHA256。当前仅 ad-hoc 签名、未公证；安装和系统拦截处理见[安装指南](docs/INSTALL.md)。公开 Release 可直接下载。
 
-源码采用 [MIT License](LICENSE)。仓库保持私有；采用 MIT 不代表自动公开仓库。关于窗口包含实际版本/build、作者、网站、仓库、离线文档和完整 MIT 协议。
+源码采用 [MIT License](LICENSE)。仓库公开开源。关于窗口展示版本、作者、网站及项目链接，完整协议通过独立面板查看。
+
+## 界面
+
+盾牌与声波组成品牌标记，菜单栏使用单色模板，App 图标使用绿色底色。设置拆分为常规和设备页；关于页参考同作者两个原生工程重设计。
+
+以下为真实原生视图使用模拟设备生成的预览，不包含用户设备数据。
+
+![常规设置](docs/assets/v0.2.0/settings-general.png)
+![设备设置](docs/assets/v0.2.0/settings-devices.png)
+![关于](docs/assets/v0.2.0/about.png)

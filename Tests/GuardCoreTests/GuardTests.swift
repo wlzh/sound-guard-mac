@@ -34,6 +34,13 @@ private func speaker(_ volume: Float = 0.4, id: UInt32 = 1, uid: String = "speak
 }
 
 final class PolicyTests: XCTestCase {
+    func testStatusPresentation() {
+        XCTAssertEqual(GuardPresentation.headline(.zero, now: 0), "音量已归零")
+        XCTAssertEqual(GuardPresentation.headline(.playing, now: 0), "正在播放，保持音量")
+        XCTAssertEqual(GuardPresentation.headline(.waiting(301), now: 0), "空闲中，约 6 分钟后归零")
+        XCTAssertEqual(GuardPresentation.headline(.waiting(0), now: 1), "空闲中，约 1 分钟后归零")
+        XCTAssertEqual(GuardPresentation.headline(.fault("internal details"), now: 0), "保护需要检查")
+    }
     func testDefaultSettings() {
         let p = Preferences(); XCTAssertEqual(p.timeout, 300); XCTAssertTrue(p.enabled)
         XCTAssertTrue(p.protectBuiltIn); XCTAssertFalse(p.detectSilentStream); XCTAssertTrue(p.selectedDevices.isEmpty)
@@ -330,6 +337,7 @@ let controllerTests = ControllerTests()
 let meterTests = MeterTests()
 let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
     (policyTests, [
+        ("status presentation", policyTests.testStatusPresentation),
         ("defaults", policyTests.testDefaultSettings), ("timeout bounds", policyTests.testTimeoutValidation),
         ("preferences persistence", policyTests.testPreferencesRoundTrip), ("corrupt preferences", policyTests.testCorruptPreferencesUseDefaults),
         ("invalid saved timeout", policyTests.testInvalidPersistedTimeoutSanitized), ("built-in default", policyTests.testDefaultOnlyBuiltIn),
