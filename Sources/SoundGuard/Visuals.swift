@@ -97,9 +97,9 @@ enum UI {
         button.contentTintColor = .linkColor; return button
     }
     static func menuHeader(headline: String, detail: String, volume: String? = nil) -> NSView {
-        let header = NSView(frame: NSRect(x: 0, y: 0, width: 316, height: 84))
+        let header = NSView(frame: NSRect(x: 0, y: 0, width: 316, height: 72))
         header.widthAnchor.constraint(equalToConstant: 316).isActive = true
-        header.heightAnchor.constraint(equalToConstant: 84).isActive = true
+        header.heightAnchor.constraint(equalToConstant: 72).isActive = true
         let name = stack([image(BrandAssets.mark(size: 14), size: 14), label("声音守卫", size: 12, weight: .medium, color: .secondaryLabelColor)], vertical: false, spacing: 6)
         let title = label(headline, size: 14, weight: .medium)
         let info = label(detail, size: 12, color: .secondaryLabelColor)

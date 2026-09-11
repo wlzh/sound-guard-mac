@@ -4,11 +4,11 @@
 
 ![声音守卫：深色设置界面与菜单栏操作](docs/assets/v0.2.0/app-overview.png)
 
-**v0.2.1 / build 3：开发预览。** 已实现原生 App、两种检测模式、设备白名单、设置与关于。尚未完成全部设备与长期性能验收，具体证据及限制见[测试报告](docs/TESTING.md)，不将构建成功当作全部实机通过。
+**v0.2.2 / build 4：开发预览。** 已实现原生 App、两种检测模式、设备白名单、设置与关于。尚未完成全部设备与长期性能验收，具体证据及限制见[测试报告](docs/TESTING.md)，不将构建成功当作全部实机通过。
 
-上图为 v0.2.0 实机截图；v0.2.1 收紧了菜单顶部，设备名称与音量左右分列。以下为当前代码原生渲染的深色顶部预览：
+上图为 v0.2.0 实机截图；v0.2.2 收紧了菜单顶部，设备名称与音量左右分列。以下为当前代码原生渲染的深色顶部预览：
 
-![菜单顶部](docs/assets/v0.2.1/menu-header-dark.png)
+![菜单顶部](docs/assets/v0.2.2/menu-header-dark.png)
 
 ## 功能
 
@@ -25,7 +25,7 @@
 
 ## 文档与检查
 
-- [v0.2.1 产品需求与验收清单](docs/prd/v0.2.1/prd.md)
+- [v0.2.2 产品需求与验收清单](docs/prd/v0.2.2/prd.md)
 - [文档索引及交付状态](docs/README.md)
 - [测试状态与发布门禁](docs/TESTING.md)
 - [贡献说明](CONTRIBUTING.md)、[安全说明](SECURITY.md)、[版本记录](CHANGELOG.md)
@@ -53,6 +53,6 @@ open "dist/Sound Guard.app"
 
 以下为真实原生视图使用模拟设备生成的预览，不包含用户设备数据。
 
-![常规设置](docs/assets/v0.2.1/settings-general.png)
-![设备设置](docs/assets/v0.2.1/settings-devices.png)
-![关于](docs/assets/v0.2.1/about.png)
+![常规设置](docs/assets/v0.2.2/settings-general.png)
+![设备设置](docs/assets/v0.2.2/settings-devices.png)
+![关于](docs/assets/v0.2.2/about.png)
