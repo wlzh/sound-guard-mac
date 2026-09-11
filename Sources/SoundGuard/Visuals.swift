@@ -96,16 +96,42 @@ enum UI {
         button.isBordered = false; button.font = .systemFont(ofSize: 12, weight: .medium)
         button.contentTintColor = .linkColor; return button
     }
-    static func menuHeader(headline: String, detail: String) -> NSView {
-        let header = NSView(frame: NSRect(x: 0, y: 0, width: 316, height: 106))
+    static func menuHeader(headline: String, detail: String, volume: String? = nil) -> NSView {
+        let header = NSView(frame: NSRect(x: 0, y: 0, width: 316, height: 84))
         header.widthAnchor.constraint(equalToConstant: 316).isActive = true
-        header.heightAnchor.constraint(equalToConstant: 106).isActive = true
-        let name = stack([image(BrandAssets.mark(size: 18), size: 18), label("声音守卫", size: 13, weight: .semibold)], vertical: false, spacing: 7)
-        let title = label(headline, size: 16, weight: .medium)
+        header.heightAnchor.constraint(equalToConstant: 84).isActive = true
+        let name = stack([image(BrandAssets.mark(size: 14), size: 14), label("声音守卫", size: 12, weight: .medium, color: .secondaryLabelColor)], vertical: false, spacing: 6)
+        let title = label(headline, size: 14, weight: .medium)
         let info = label(detail, size: 12, color: .secondaryLabelColor)
-        info.maximumNumberOfLines = 2
-        let body = stack([name, title, info], spacing: 6)
-        pin(body, in: header, padding: 14)
+        let value = label(volume ?? "", size: 12, color: .secondaryLabelColor)
+        value.alignment = .right
+        value.widthAnchor.constraint(equalToConstant: volume == nil ? 0 : 42).isActive = true
+        name.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        name.detachesHiddenViews = false
+        value.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        value.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for field in [title, info] {
+            field.maximumNumberOfLines = 1; field.lineBreakMode = .byTruncatingTail
+            field.toolTip = field.stringValue
+            field.setAccessibilityLabel(field.stringValue)
+            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        value.setAccessibilityLabel(volume.map { "输出音量 " + $0 } ?? "")
+        for view in [name, title, info, value] {
+            view.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            name.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
+            name.topAnchor.constraint(equalTo: header.topAnchor, constant: 10),
+            title.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            title.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 5),
+            title.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
+            info.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            info.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5),
+            value.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
+            value.firstBaselineAnchor.constraint(equalTo: info.firstBaselineAnchor),
+            info.trailingAnchor.constraint(equalTo: value.leadingAnchor, constant: -12)
+        ])
         return header
     }
 }

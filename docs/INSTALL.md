@@ -1,10 +1,10 @@
 # 安装与卸载
 
-v0.2.0 / build 2，开发预览；macOS 14.2+，Universal arm64/x86_64。当前本机验证平台 macOS 15.6 / Apple Silicon，其他平台需实机验证。
+v0.2.1 / build 3，开发预览；macOS 14.2+，Universal arm64/x86_64。当前本机验证平台 macOS 15.6 / Apple Silicon，其他平台需实机验证。
 
 ## 安装
 
-从 [公开 Release](https://github.com/wlzh/sound-guard-mac/releases) 下载 `SoundGuard-v0.2.0-macos-universal.zip` 和 SHA256.txt，在同一目录执行 `shasum -a 256 -c SHA256.txt`。解压后把 Sound Guard.app 放入 `/Applications` 或 `~/Applications` 再打开。
+从 [公开 Release](https://github.com/wlzh/sound-guard-mac/releases) 下载 `SoundGuard-v0.2.1-macos-universal.zip` 和 SHA256.txt，在同一目录执行 `shasum -a 256 -c SHA256.txt`。解压后把 Sound Guard.app 放入 `/Applications` 或 `~/Applications` 再打开。
 
 当前 ad-hoc 签名，没有 Apple Developer ID 和公证。若 macOS 拦截，在确认来源和校验和后按系统“隐私与安全性”提供的允许打开流程操作；不建议全局关闭 Gatekeeper。升级前退出旧实例，再替换 App，不同时运行两份。
 
