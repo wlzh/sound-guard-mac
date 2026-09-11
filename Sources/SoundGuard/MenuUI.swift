@@ -6,9 +6,10 @@ extension AppDelegate {
         menu.removeAllItems(); menu.autoenablesItems = false
         let header = NSMenuItem(); header.isEnabled = false
         let device = displayDevice
-        var detail = device.map { $0.name + ($0.controllable ? " · \(Int($0.volume * 100))%" : "") } ?? "连接输出设备后自动核对"
-        if case .fault(let message) = displayState { detail = message }
-        header.view = UI.menuHeader(headline: GuardPresentation.headline(displayState, now: ProcessInfo.processInfo.systemUptime), detail: detail)
+        var detail = device?.name ?? "连接输出设备后自动核对"
+        var volume = device.flatMap { $0.controllable && $0.volume.isFinite ? "\(Int(max(0, min(1, $0.volume)) * 100))%" : nil }
+        if case .fault(let message) = displayState { detail = message; volume = nil }
+        header.view = UI.menuHeader(headline: GuardPresentation.headline(displayState, now: ProcessInfo.processInfo.systemUptime), detail: detail, volume: volume)
         menu.addItem(header); menu.addItem(.separator())
         item("自动保护", #selector(toggleEnabled), in: menu).state = controller.preferences.enabled ? .on : .off
         let zero = item("立即归零", #selector(zeroNow), in: menu)
