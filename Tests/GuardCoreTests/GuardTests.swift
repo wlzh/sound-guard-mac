@@ -333,6 +333,21 @@ final class ControllerTests: XCTestCase {
         audio.sources = []; audio.onChange?(); audio.sources = [PlaybackProcess(pid: 2)]; audio.onChange?()
         XCTAssertEqual(prompts.count, 2)
     }
+    func testKeepSilentConsumesRecoveryAndStopsMonitoring() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        XCTAssertEqual(prompts.count, 1); XCTAssertNotNil(controller.recoveryPromptID)
+        controller.keepSilent(for: UUID())
+        XCTAssertNotNil(controller.recoveryPromptID); XCTAssertTrue(controller.recoveryMonitoringActive)
+        controller.keepSilent(for: prompts[0].id)
+        XCTAssertNil(controller.recoveryPromptID); XCTAssertFalse(controller.recoveryMonitoringActive)
+        XCTAssertNil(audio.monitored); XCTAssertEqual(audio.restoreWrites, 0)
+        XCTAssertEqual(audio.device?.volume, 0); XCTAssertEqual(controller.lastAction, "已确认保持静音")
+        audio.sources = []; audio.onChange?(); audio.sources = [PlaybackProcess(pid: 2)]; audio.onChange?()
+        XCTAssertEqual(prompts.count, 1)
+    }
     func testSilentStreamRecoveryWaitsForAudibleSignal() {
         var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
         var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
@@ -508,6 +523,7 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("recovery playback edge", controllerTests.testAutoZeroArmsRecoveryAndPromptsOnPlaybackEdge),
         ("recovery callback reentrancy", controllerTests.testSynchronousRecoveryCallbackCannotResurrectContext),
         ("recovery next playback", controllerTests.testRecoveryCanPromptAgainOnlyAfterPlaybackStops),
+        ("recovery keep silent consumes context", controllerTests.testKeepSilentConsumesRecoveryAndStopsMonitoring),
         ("silent stream recovery signal edge", controllerTests.testSilentStreamRecoveryWaitsForAudibleSignal),
         ("silent stream recovery failure isolation", controllerTests.testSilentStreamRecoveryFailureKeepsSuccessfulZero),
         ("recovery detection mode invalidation", controllerTests.testChangingRecoveryDetectionModeInvalidatesContext),

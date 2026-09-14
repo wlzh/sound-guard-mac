@@ -52,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             do { try self?.controller.restoreVolume(for: prompt.id) }
             catch { self?.showError(error.localizedDescription) }
         }
+        recoveryPresenter.onKeepSilent = { [weak self] prompt in
+            self?.controller.keepSilent(for: prompt.id)
+        }
         controller.onRecoveryPrompt = { [weak self] prompt in self?.recoveryPresenter.show(prompt) }
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in

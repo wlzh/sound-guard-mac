@@ -70,7 +70,7 @@ extension AppDelegate {
         let unit = NSPopUpButton(); unit.addItems(withTitles: ["秒", "分钟"]); unit.selectItem(at: useMinutes ? 1 : 0)
         let recoveryInput = UI.stack([recoveryField, unit, NSButton(title: "应用", target: self, action: #selector(applyRecoveryDuration))], vertical: false, spacing: 7)
         recoveryDurationField = recoveryField; recoveryUnitPopup = unit
-        let recoveryDelay = UI.row(title: "提示停留", detail: "5 秒至 10 分钟；超时后保持静音。", control: recoveryInput)
+        let recoveryDelay = UI.row(title: "提示停留", detail: "5 秒至 10 分钟；超时关闭，下次播放仍可提醒。", control: recoveryInput)
         let permissionButton = NSButton(title: "权限设置…", target: self, action: #selector(openAccessibilitySettings))
         permissionButton.isEnabled = p.recoveryPromptEnabled
         let permissionDetail = !p.recoveryPromptEnabled ? "功能关闭时不申请辅助功能权限。" : PlaybackScreenLocator.trusted ? "辅助功能已授权，优先显示在播放 App 所在屏幕。" : "未授权时回退到鼠标所在屏幕，不影响自动归零。"

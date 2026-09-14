@@ -187,6 +187,13 @@ public final class GuardController {
         lastAction = "已确认恢复音量"
         policy.reset(); refresh()
     }
+    public func keepSilent(for promptID: UUID) {
+        guard running, let saved = recovery, saved.id == promptID else { return }
+        recovery = nil; recoveryMonitoringActive = false
+        try? audio.setMonitoring(device: nil, signal: false)
+        lastAction = "已确认保持静音"
+        policy.reset(); refresh()
+    }
     private func invalidate() { generation += 1; scheduler.cancel() }
     private func fail(_ error: Error) {
         writeFault = error.localizedDescription

@@ -82,6 +82,7 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
     private var prompt: RecoveryPrompt?
     private var countdown: NSTextField?
     var onRestore: ((RecoveryPrompt) -> Void)?
+    var onKeepSilent: ((RecoveryPrompt) -> Void)?
     var currentPanel: NSPanel? { panel }
     var currentPromptID: UUID? { prompt?.id }
 
@@ -95,6 +96,10 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
         panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = true; panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .transient]
         panel.isReleasedWhenClosed = false; panel.delegate = self
+        if let closeButton = panel.standardWindowButton(.closeButton) {
+            closeButton.toolTip = "暂时关闭；下次播放仍会提醒"
+            closeButton.setAccessibilityLabel("暂时关闭恢复提示；下次播放仍会提醒")
+        }
 
         let appName = PlaybackScreenLocator.appName(for: prompt.processes)
         let eyebrow = UI.label("声音守卫 · 播放保护", size: 11, weight: .medium, color: .secondaryLabelColor)
@@ -110,8 +115,9 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
         let card = UI.group([summary], width: 380)
         let countdown = UI.label("", size: 12, weight: .medium, color: .secondaryLabelColor)
         self.countdown = countdown
-        let keep = UI.actionButton("继续静音", target: self, action: #selector(dismiss), width: 185)
-        let restore = UI.actionButton("恢复到 \(Int(prompt.volume * 100))%", target: self,
+        let keep = UI.actionButton("保持静音，不再提醒", target: self, action: #selector(keepSilent), width: 185)
+        keep.setAccessibilityLabel("保持静音，并且不再提醒本次自动归零")
+        let restore = UI.actionButton("恢复音量到 \(Int(prompt.volume * 100))%", target: self,
                                       action: #selector(restore), primary: true, width: 185)
         restore.setAccessibilityLabel("确认恢复系统音量至 \(Int(prompt.volume * 100))%")
         let actions = UI.stack([keep, restore], vertical: false, spacing: 10)
@@ -139,11 +145,14 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
 
     @objc private func updateCountdown() {
         let remaining = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
-        countdown?.stringValue = "还剩 \(remaining) 秒 · 超时后继续静音"
+        countdown?.stringValue = "还剩 \(remaining) 秒 · 超时后关闭，下次播放仍提醒"
         if remaining == 0 { close() }
     }
     func expireForTesting() { deadline = .distantPast; updateCountdown() }
-    @objc private func dismiss() { close() }
+    @objc private func keepSilent() {
+        guard let prompt else { close(); return }
+        close(); onKeepSilent?(prompt)
+    }
     @objc private func restore() {
         guard let prompt else { close(); return }
         close(); onRestore?(prompt)
