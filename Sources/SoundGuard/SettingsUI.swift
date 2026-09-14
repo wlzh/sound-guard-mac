@@ -80,7 +80,7 @@ extension AppDelegate {
         return UI.stack([
             UI.section("自动归零"), UI.group([enable, delay]),
             UI.section("进阶检测"), UI.group([signal]),
-            UI.label("默认关闭。开启后会读取系统音频信号，需要相应权限，并增加少量运行开销。音量为 0 时停止信号分析；若启用恢复提醒，只保留播放事件监听。", size: 12, color: .secondaryLabelColor),
+            UI.label("默认关闭。开启后读取系统音频信号，需要相应权限并增加运行开销。若同时开启恢复提醒，自动归零后会继续分析信号，区分静音流与真正有声；否则归零后停止检测。", size: 12, color: .secondaryLabelColor),
             UI.section("音量恢复提醒"), UI.group([recovery, recoveryDelay, permission]),
             UI.label("此功能默认关闭。开启后，只有由声音守卫自动归零时才保存本次原音量；手动归零不提示。恢复前会再次核对设备和音量。", size: 12, color: .secondaryLabelColor),
             UI.section("启动"), UI.group([login])
@@ -89,7 +89,7 @@ extension AppDelegate {
     @objc func changeRecoveryPrompt(_ sender: NSSwitch) {
         if sender.state == .on {
             let alert = NSAlert(); alert.messageText = "开启播放恢复提醒？"
-            alert.informativeText = "自动归零后会保留低开销的播放事件监听。检测到新的播放活动时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。"
+            alert.informativeText = "自动归零后，默认模式保留播放事件监听；若已开启静音流检测，则继续分析信号以避免静音误报。检测到新的播放时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。"
             alert.addButton(withTitle: "开启并继续"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { sender.state = .off; return }
         }
