@@ -5,8 +5,8 @@ enum BrandAssets {
     static let accent = NSColor(srgbRed: 0.035, green: 0.52, blue: 0.44, alpha: 1)
     static func resource(_ name: String, ext: String) -> URL {
         if let url = Bundle.main.url(forResource: name, withExtension: ext) { return url }
-        return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("Resources/\(name).\(ext)")
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Resources/\(name).\(ext)")
     }
     static func mark(size: CGFloat = 20) -> NSImage? {
         guard let image = NSImage(contentsOf: resource("BrandMark", ext: "svg")) else { return nil }
