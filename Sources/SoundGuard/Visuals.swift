@@ -2,6 +2,7 @@ import AppKit
 import GuardCore
 
 enum BrandAssets {
+    static let accent = NSColor(srgbRed: 0.035, green: 0.52, blue: 0.44, alpha: 1)
     static func resource(_ name: String, ext: String) -> URL {
         if let url = Bundle.main.url(forResource: name, withExtension: ext) { return url }
         return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -24,6 +25,13 @@ final class NativeSurface: NSView {
 }
 
 enum UI {
+    static func alert(message: String, informative: String = "") -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = informative
+        alert.icon = BrandAssets.icon(size: 64)
+        return alert
+    }
     static func label(_ text: String, size: CGFloat = 13, weight: NSFont.Weight = .regular,
                       color: NSColor = .labelColor, centered: Bool = false) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: text)
@@ -95,6 +103,24 @@ enum UI {
         let button = NSButton(title: title, target: target, action: action)
         button.isBordered = false; button.font = .systemFont(ofSize: 12, weight: .medium)
         button.contentTintColor = .linkColor; return button
+    }
+    static func actionButton(_ title: String, target: AnyObject, action: Selector,
+                             primary: Bool = false, width: CGFloat) -> NSButton {
+        let button = NSButton(title: title, target: target, action: action)
+        button.bezelStyle = .rounded
+        button.controlSize = .large
+        button.font = .systemFont(ofSize: 13, weight: primary ? .semibold : .medium)
+        button.keyEquivalent = ""
+        button.widthAnchor.constraint(equalToConstant: width).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        if primary {
+            button.isBordered = false
+            button.wantsLayer = true
+            button.layer?.backgroundColor = BrandAssets.accent.cgColor
+            button.layer?.cornerRadius = 7
+            button.contentTintColor = .white
+        }
+        return button
     }
     static func menuHeader(headline: String, detail: String, volume: String? = nil) -> NSView {
         let header = NSView(frame: NSRect(x: 0, y: 0, width: 316, height: 72))

@@ -88,8 +88,7 @@ extension AppDelegate {
     }
     @objc func changeRecoveryPrompt(_ sender: NSSwitch) {
         if sender.state == .on {
-            let alert = NSAlert(); alert.messageText = "开启播放恢复提醒？"
-            alert.informativeText = "自动归零后，默认模式保留播放事件监听；若已开启静音流检测，则继续分析信号以避免静音误报。检测到新的播放时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。"
+            let alert = UI.alert(message: "开启播放恢复提醒？", informative: "自动归零后，默认模式保留播放事件监听；若已开启静音流检测，则继续分析信号以避免静音误报。检测到新的播放时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。")
             alert.addButton(withTitle: "开启并继续"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { sender.state = .off; return }
         }

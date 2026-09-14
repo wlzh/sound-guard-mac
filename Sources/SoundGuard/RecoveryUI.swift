@@ -88,7 +88,7 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
     func show(_ prompt: RecoveryPrompt) {
         close()
         self.prompt = prompt; deadline = Date().addingTimeInterval(prompt.timeout)
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 224),
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 264),
             styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false)
         panel.title = "声音守卫"; panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
@@ -97,31 +97,33 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
         panel.isReleasedWhenClosed = false; panel.delegate = self
 
         let appName = PlaybackScreenLocator.appName(for: prompt.processes)
+        let eyebrow = UI.label("声音守卫 · 播放保护", size: 11, weight: .medium, color: .secondaryLabelColor)
         let heading = UI.stack([
-            UI.image(BrandAssets.icon(size: 32), size: 32),
-            UI.stack([UI.label("检测到新的播放", size: 15, weight: .semibold),
-                      UI.label(appName, size: 12, color: .secondaryLabelColor)], spacing: 2)
-        ], vertical: false, spacing: 10)
-        let volume = UI.label("\(Int(prompt.volume * 100))%", size: 18, weight: .semibold)
-        let summary = UI.row(title: "恢复系统音量", detail: prompt.deviceName, control: volume)
-        let card = UI.group([summary], width: 360)
-        let countdown = UI.label("", size: 11, color: .secondaryLabelColor)
+            UI.image(BrandAssets.icon(size: 42), size: 42),
+            UI.stack([eyebrow, UI.label("要恢复声音吗？", size: 17, weight: .semibold),
+                      UI.label("\(appName) 已开始播放", size: 12, color: .secondaryLabelColor)], spacing: 3)
+        ], vertical: false, spacing: 12)
+        let volume = UI.label("\(Int(prompt.volume * 100))%", size: 24, weight: .semibold)
+        volume.font = .monospacedDigitSystemFont(ofSize: 24, weight: .semibold)
+        volume.alignment = .right
+        let summary = UI.row(title: "归零前的系统音量", detail: prompt.deviceName, control: volume)
+        let card = UI.group([summary], width: 380)
+        let countdown = UI.label("", size: 12, weight: .medium, color: .secondaryLabelColor)
         self.countdown = countdown
-        let keep = NSButton(title: "保持静音", target: self, action: #selector(dismiss))
-        let restore = NSButton(title: "恢复至 \(Int(prompt.volume * 100))%", target: self, action: #selector(restore))
-        restore.keyEquivalent = ""; keep.keyEquivalent = ""
+        let keep = UI.actionButton("继续静音", target: self, action: #selector(dismiss), width: 185)
+        let restore = UI.actionButton("恢复到 \(Int(prompt.volume * 100))%", target: self,
+                                      action: #selector(restore), primary: true, width: 185)
         restore.setAccessibilityLabel("确认恢复系统音量至 \(Int(prompt.volume * 100))%")
-        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let actions = UI.stack([spacer, keep, restore], vertical: false, spacing: 8)
-        let body = UI.stack([heading, card, countdown, actions], spacing: 10)
+        let actions = UI.stack([keep, restore], vertical: false, spacing: 10)
+        let body = UI.stack([heading, card, countdown, actions], spacing: 12)
         actions.alignment = .centerY
         body.translatesAutoresizingMaskIntoConstraints = false
         let root = NativeSurface(); panel.contentView = root; root.addSubview(body)
         NSLayoutConstraint.activate([
             body.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
             body.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            body.topAnchor.constraint(equalTo: root.topAnchor, constant: 26),
-            body.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -18),
+            body.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            body.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -18),
             actions.trailingAnchor.constraint(equalTo: body.trailingAnchor)
         ])
         self.panel = panel; updateCountdown()
@@ -137,7 +139,7 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
 
     @objc private func updateCountdown() {
         let remaining = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
-        countdown?.stringValue = "\(remaining) 秒后关闭并保持静音"
+        countdown?.stringValue = "还剩 \(remaining) 秒 · 超时后继续静音"
         if remaining == 0 { close() }
     }
     func expireForTesting() { deadline = .distantPast; updateCountdown() }

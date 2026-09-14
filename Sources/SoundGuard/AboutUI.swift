@@ -43,7 +43,7 @@ extension AppDelegate {
         let local = Bundle.main.resourceURL?.appendingPathComponent("LICENSE")
         let source = BrandAssets.resource("BrandMark", ext: "svg").deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("LICENSE")
         let license = (local.flatMap { try? String(contentsOf: $0, encoding: .utf8) }) ?? (try? String(contentsOf: source, encoding: .utf8)) ?? "完整 MIT 协议请查看 GitHub 仓库中的 LICENSE。"
-        let alert = NSAlert(); alert.messageText = "MIT License"; alert.informativeText = "Copyright © 2026 wlzh"
+        let alert = UI.alert(message: "MIT License", informative: "Copyright © 2026 wlzh")
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 240)); scroll.hasVerticalScroller = true
         let view = NSTextView(frame: scroll.bounds); view.isEditable = false; view.string = license
         view.font = .monospacedSystemFont(ofSize: 11, weight: .regular); view.textContainerInset = NSSize(width: 8, height: 8)

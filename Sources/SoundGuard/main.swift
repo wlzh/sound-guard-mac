@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var displayState: GuardState { previewState ?? controller.state }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.applicationIconImage = BrandAssets.icon(size: 128)
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("uk.869hr.SoundGuard")
         do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
         catch { showError("无法建立单实例锁目录：" + error.localizedDescription); NSApp.terminate(nil); return }
@@ -145,8 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc func changeSignal(_ sender: NSSwitch) {
         if sender.state == .on {
-            let alert = NSAlert(); alert.messageText = "开启静音流检测？"
-            alert.informativeText = "会读取受保护设备的系统音频信号，可能出现系统音频录制权限提示。若同时开启恢复提醒，自动归零后继续检测真实有声信号；否则归零后停止。不保存音频；开启后 CPU 开销会增加。权限拒绝或检测异常时停止相应检测，可关闭此选项恢复默认模式。"
+            let alert = UI.alert(message: "开启静音流检测？", informative: "会读取受保护设备的系统音频信号，可能出现系统音频录制权限提示。若同时开启恢复提醒，自动归零后继续检测真实有声信号；否则归零后停止。不保存音频；开启后 CPU 开销会增加。权限拒绝或检测异常时停止相应检测，可关闭此选项恢复默认模式。")
             alert.addButton(withTitle: "开启"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { sender.state = .off; return }
         }
@@ -166,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } catch { showError("登录启动设置失败：" + error.localizedDescription) }
         rebuildSettings()
     }
-    func showError(_ message: String) { let alert = NSAlert(); alert.messageText = message; alert.runModal() }
+    func showError(_ message: String) { UI.alert(message: message).runModal() }
     @objc func openAuthor() { NSWorkspace.shared.open(URL(string: "https://x.com/wlzh")!) }
     @objc func openWebsite() { NSWorkspace.shared.open(URL(string: "https://869hr.uk")!) }
     @objc func openRepository() { NSWorkspace.shared.open(URL(string: repository)!) }

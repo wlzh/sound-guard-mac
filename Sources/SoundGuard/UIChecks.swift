@@ -13,6 +13,7 @@ func runUIChecks(outputDirectory: URL?) throws {
     var p = Preferences(); p.selectedDevices[headphones.selectionID] = headphones.name
     delegate.controller.configure(p)
     precondition(BrandAssets.mark()?.isTemplate == true && BrandAssets.icon() != nil)
+    precondition(UI.alert(message: "品牌检查").icon != nil)
     delegate.settings = delegate.window("声音守卫设置", width: 580, height: 650)
     delegate.rebuildSettings()
     precondition(delegate.minutesField?.stringValue == "5")
@@ -96,20 +97,26 @@ func runUIChecks(outputDirectory: URL?) throws {
     let recoveryPanel = delegate.recoveryPresenter.currentPanel!
     recoveryPanel.appearance = NSAppearance(named: .aqua); recoveryPanel.contentView?.layoutSubtreeIfNeeded()
     precondition(recoveryPanel.styleMask.contains(.nonactivatingPanel) && recoveryPanel.level == .floating)
+    precondition(recoveryPanel.frame.size == NSSize(width: 420, height: 264))
     let recoveryViews = descendants(recoveryPanel.contentView!)
     precondition(recoveryViews.compactMap { $0 as? NSImageView }.contains { $0.image != nil })
-    let recoveryButtons = recoveryViews.compactMap { $0 as? NSButton }.filter { ["保持静音", "恢复至 25%"].contains($0.title) }
+    let recoveryLabels = recoveryViews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+    precondition(recoveryLabels.contains("声音守卫 · 播放保护") && recoveryLabels.contains("要恢复声音吗？") && recoveryLabels.contains("某个 App 已开始播放"))
+    let recoveryButtons = recoveryViews.compactMap { $0 as? NSButton }.filter { ["继续静音", "恢复到 25%"].contains($0.title) }
     precondition(recoveryButtons.count == 2)
+    let buttonRects = recoveryButtons.map { $0.alignmentRect(forFrame: $0.frame) }
+    precondition(buttonRects.allSatisfy { abs($0.width - 185) < 0.5 && abs($0.height - 34) < 0.5 })
+    precondition(recoveryButtons.first { $0.title == "恢复到 25%" }?.isBordered == false)
     precondition(recoveryButtons.allSatisfy { $0.keyEquivalent.isEmpty })
-    precondition(recoveryViews.compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("60 秒后关闭") })
+    precondition(recoveryLabels.contains { $0.contains("还剩 60 秒") })
     try render(recoveryPanel.contentView, name: "recovery-prompt-light")
     recoveryPanel.appearance = NSAppearance(named: .darkAqua); recoveryPanel.contentView?.layoutSubtreeIfNeeded()
     try render(recoveryPanel.contentView, name: "recovery-prompt-dark")
-    recoveryButtons.first { $0.title == "恢复至 25%" }!.performClick(nil)
+    recoveryButtons.first { $0.title == "恢复到 25%" }!.performClick(nil)
     precondition(restored && delegate.recoveryPresenter.currentPanel == nil)
     restored = false; delegate.recoveryPresenter.show(recoveryPrompt)
     let keepViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
-    keepViews.compactMap { $0 as? NSButton }.first { $0.title == "保持静音" }!.performClick(nil)
+    keepViews.compactMap { $0 as? NSButton }.first { $0.title == "继续静音" }!.performClick(nil)
     precondition(!restored && delegate.recoveryPresenter.currentPanel == nil)
     delegate.recoveryPresenter.show(recoveryPrompt); delegate.recoveryPresenter.expireForTesting()
     precondition(!restored && delegate.recoveryPresenter.currentPanel == nil)
@@ -122,5 +129,5 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
-    print("UI_CHECKS=PASS; ASSERTIONS=38; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
+    print("UI_CHECKS=PASS; ASSERTIONS=43; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }
