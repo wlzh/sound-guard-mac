@@ -20,6 +20,7 @@ func runUIChecks(outputDirectory: URL?) throws {
     let menu = NSMenu(); delegate.menuWillOpen(menu)
     precondition(menu.items.contains { $0.title == "自动保护" && $0.state == .on })
     precondition(menu.items.contains { $0.title == "静音流也计时" && $0.state == .off })
+    precondition(menu.items.contains { $0.title == "播放时提示恢复" && $0.state == .off })
     precondition(menu.items.contains { $0.title == "立即归零" && !$0.isEnabled })
     precondition(menu.items.contains { $0.title == "保护设备…" && $0.action == #selector(AppDelegate.showDeviceSettings) })
     precondition(menu.items.first?.view != nil)
@@ -32,6 +33,17 @@ func runUIChecks(outputDirectory: URL?) throws {
         try bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent(name + ".png"))
     }
     try render(delegate.settings?.contentView, name: "settings-general")
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let generalViews = descendants(delegate.settings!.contentView!)
+    precondition(generalViews.compactMap { $0 as? NSSwitch }.contains { $0.accessibilityLabel() == "播放时提示恢复" })
+    precondition(delegate.recoveryDurationField?.stringValue == "1" && delegate.recoveryUnitPopup?.titleOfSelectedItem == "分钟")
+    precondition(generalViews.compactMap { $0 as? NSButton }.contains { $0.title == "权限设置…" && !$0.isEnabled })
+    if let scroll = generalViews.compactMap({ $0 as? NSScrollView }).first,
+       let document = scroll.documentView {
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, document.frame.height - scroll.contentView.bounds.height)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try render(delegate.settings?.contentView, name: "settings-recovery")
+    }
     try render(delegate.about?.contentView, name: "about")
     let preview = NativeSurface(frame: NSRect(x: 0, y: 0, width: 316, height: 366))
     let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 2
@@ -76,6 +88,33 @@ func runUIChecks(outputDirectory: URL?) throws {
     let details = compact.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == longName }!
     precondition(details.toolTip == longName && details.maximumNumberOfLines == 1)
     precondition(compact.frame.width == 316 && details.alignmentRect(forFrame: details.frame).maxX <= 302)
+    precondition(NSScreen.screens.contains(PlaybackScreenLocator.screen(for: [PlaybackProcess(pid: 0)], accessibilityTrusted: false)))
+    let recoveryPrompt = RecoveryPrompt(id: UUID(), deviceName: "内建扬声器", volume: 0.25,
+        processes: [PlaybackProcess(pid: 0)], timeout: 60)
+    var restored = false; delegate.recoveryPresenter.onRestore = { _ in restored = true }
+    delegate.recoveryPresenter.show(recoveryPrompt)
+    let recoveryPanel = delegate.recoveryPresenter.currentPanel!
+    recoveryPanel.appearance = NSAppearance(named: .aqua); recoveryPanel.contentView?.layoutSubtreeIfNeeded()
+    precondition(recoveryPanel.styleMask.contains(.nonactivatingPanel) && recoveryPanel.level == .floating)
+    let recoveryViews = descendants(recoveryPanel.contentView!)
+    precondition(recoveryViews.compactMap { $0 as? NSImageView }.contains { $0.image != nil })
+    let recoveryButtons = recoveryViews.compactMap { $0 as? NSButton }.filter { ["保持静音", "恢复至 25%"].contains($0.title) }
+    precondition(recoveryButtons.count == 2)
+    precondition(recoveryButtons.allSatisfy { $0.keyEquivalent.isEmpty })
+    precondition(recoveryViews.compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("60 秒后关闭") })
+    try render(recoveryPanel.contentView, name: "recovery-prompt-light")
+    recoveryPanel.appearance = NSAppearance(named: .darkAqua); recoveryPanel.contentView?.layoutSubtreeIfNeeded()
+    try render(recoveryPanel.contentView, name: "recovery-prompt-dark")
+    recoveryButtons.first { $0.title == "恢复至 25%" }!.performClick(nil)
+    precondition(restored && delegate.recoveryPresenter.currentPanel == nil)
+    restored = false; delegate.recoveryPresenter.show(recoveryPrompt)
+    let keepViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
+    keepViews.compactMap { $0 as? NSButton }.first { $0.title == "保持静音" }!.performClick(nil)
+    precondition(!restored && delegate.recoveryPresenter.currentPanel == nil)
+    delegate.recoveryPresenter.show(recoveryPrompt); delegate.recoveryPresenter.expireForTesting()
+    precondition(!restored && delegate.recoveryPresenter.currentPanel == nil)
+    delegate.recoveryPresenter.show(recoveryPrompt); delegate.updateStatus()
+    precondition(delegate.recoveryPresenter.currentPanel == nil)
     delegate.selectedSettingsPage = 1; delegate.rebuildSettings()
     precondition(delegate.minutesField == nil && delegate.deviceButtons.count == 3)
     precondition(delegate.deviceButtons.keys.filter { !$0.isEnabled }.count == 1)
@@ -83,5 +122,5 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
-    print("UI_CHECKS=PASS; ASSERTIONS=20; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
+    print("UI_CHECKS=PASS; ASSERTIONS=38; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }

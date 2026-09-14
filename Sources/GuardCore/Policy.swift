@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.2.2"
-    public static let build = "4"
+    public static let current = "0.3.0"
+    public static let build = "5"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -11,15 +11,33 @@ public struct Preferences: Codable, Equatable {
     public var detectSilentStream = false
     public var protectBuiltIn = true
     public var selectedDevices: [String: String] = [:]
+    public var recoveryPromptEnabled = false
+    public var recoveryPromptSeconds = 60
     public init() {}
     public var timeout: TimeInterval { Double((1...120).contains(minutes) ? minutes : 5) * 60 }
+    public var recoveryPromptTimeout: TimeInterval { Double((5...600).contains(recoveryPromptSeconds) ? recoveryPromptSeconds : 60) }
     public func includes(_ device: OutputDevice) -> Bool {
         device.builtInSpeaker ? protectBuiltIn : selectedDevices[device.selectionID] != nil
     }
     public static func decode(_ data: Data?) -> Preferences {
         guard let data, var value = try? JSONDecoder().decode(Self.self, from: data) else { return .init() }
         if !(1...120).contains(value.minutes) { value.minutes = 5 }
+        if !(5...600).contains(value.recoveryPromptSeconds) { value.recoveryPromptSeconds = 60 }
         return value
+    }
+    private enum CodingKeys: String, CodingKey {
+        case enabled, minutes, detectSilentStream, protectBuiltIn, selectedDevices
+        case recoveryPromptEnabled, recoveryPromptSeconds
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        minutes = try values.decodeIfPresent(Int.self, forKey: .minutes) ?? 5
+        detectSilentStream = try values.decodeIfPresent(Bool.self, forKey: .detectSilentStream) ?? false
+        protectBuiltIn = try values.decodeIfPresent(Bool.self, forKey: .protectBuiltIn) ?? true
+        selectedDevices = try values.decodeIfPresent([String: String].self, forKey: .selectedDevices) ?? [:]
+        recoveryPromptEnabled = try values.decodeIfPresent(Bool.self, forKey: .recoveryPromptEnabled) ?? false
+        recoveryPromptSeconds = try values.decodeIfPresent(Int.self, forKey: .recoveryPromptSeconds) ?? 60
     }
 }
 
@@ -42,6 +60,26 @@ public struct OutputDevice: Equatable {
 }
 
 public enum Playback: Equatable { case idle, playing, unknown }
+public struct PlaybackProcess: Equatable {
+    public let pid: Int32
+    public init(pid: Int32) { self.pid = pid }
+}
+public struct VolumeSnapshot: Equatable {
+    public let values: [Float]
+    public var displayVolume: Float { values.max() ?? 0 }
+    public init(values: [Float]) { self.values = values }
+}
+public struct RecoveryPrompt: Equatable {
+    public let id: UUID
+    public let deviceName: String
+    public let volume: Float
+    public let processes: [PlaybackProcess]
+    public let timeout: TimeInterval
+    public init(id: UUID, deviceName: String, volume: Float, processes: [PlaybackProcess], timeout: TimeInterval) {
+        self.id = id; self.deviceName = deviceName; self.volume = volume
+        self.processes = processes; self.timeout = timeout
+    }
+}
 public enum GuardState: Equatable {
     case paused, sleeping, unavailable, excluded, unsupported, zero, muted, playing, waiting(TimeInterval), fault(String)
 }

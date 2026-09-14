@@ -152,7 +152,23 @@ public final class SystemAudio: AudioService {
         }
         return .idle
     }
-    public func zero(_ expected: OutputDevice) throws {
+    public func playingProcesses(for device: OutputDevice) throws -> [PlaybackProcess] {
+        var result: [PlaybackProcess] = []
+        for process in try Property(system, kAudioHardwarePropertyProcessObjectList).array() {
+            do {
+                guard try Property(process, kAudioProcessPropertyIsRunningOutput).scalar(UInt32(0)) != 0 else { continue }
+                let devices = try Property(process, kAudioProcessPropertyDevices, kAudioObjectPropertyScopeOutput).array()
+                guard devices.contains(device.id) else { continue }
+                let pid = (try? Property(process, kAudioProcessPropertyPID).scalar(pid_t(0))) ?? 0
+                result.append(PlaybackProcess(pid: pid))
+            } catch {
+                let current = try Property(system, kAudioHardwarePropertyProcessObjectList).array()
+                if current.contains(process) { throw error }
+            }
+        }
+        return result
+    }
+    public func zero(_ expected: OutputDevice) throws -> VolumeSnapshot {
         guard let current = try currentDevice(), current.id == expected.id,
               current.selectionID == expected.selectionID, current.volume == expected.volume,
               current.muted == expected.muted, current.controllable else {
@@ -163,9 +179,42 @@ public final class SystemAudio: AudioService {
                 throw GuardError("播放已恢复，本次归零取消")
             }
         }
-        for control in try controls(current.id) { try control.writeZero() }
+        let controls = try controls(current.id)
+        let snapshot = VolumeSnapshot(values: try controls.map { try $0.scalar(Float32(0)) })
+        do { for control in controls { try control.writeZero() } }
+        catch {
+            for control in controls { try? control.writeZero() }
+            throw error
+        }
         guard let verified = try currentDevice(), verified.selectionID == current.selectionID, verified.volume == 0 else {
             throw GuardError("归零后复核失败；请检查实际系统音量")
+        }
+        return snapshot
+    }
+    public func restore(_ expectedZero: OutputDevice, snapshot: VolumeSnapshot) throws {
+        guard !snapshot.values.isEmpty, snapshot.displayVolume > 0,
+              snapshot.values.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }),
+              let current = try currentDevice(), current.id == expectedZero.id,
+              current.selectionID == expectedZero.selectionID, current.volume == 0,
+              current.muted == expectedZero.muted, current.controllable else {
+            throw GuardError("设备或音量已变化，未恢复音量")
+        }
+        let controls = try controls(current.id)
+        guard controls.count == snapshot.values.count else { throw GuardError("设备音量通道已变化，未恢复音量") }
+        do { for (control, value) in zip(controls, snapshot.values) { try control.write(value, operation: "恢复音量") } }
+        catch {
+            for control in controls { try? control.writeZero() }
+            throw error
+        }
+        do {
+            let restored = try controls.map { try $0.scalar(Float32(0)) }
+            guard let verified = try currentDevice(), verified.selectionID == current.selectionID,
+                  zip(restored, snapshot.values).allSatisfy({ abs($0 - $1) < 0.001 }) else {
+                throw GuardError("恢复后复核失败")
+            }
+        } catch {
+            for control in controls { try? control.writeZero() }
+            throw GuardError(error.localizedDescription + "；已尝试重新归零")
         }
     }
 }

@@ -23,6 +23,7 @@ extension AppDelegate {
         options.addItem(.separator()); item("自定义…", #selector(showGeneralSettings), in: options)
         delay.submenu = options; menu.addItem(delay)
         item("静音流也计时", #selector(toggleSignalFromMenu), in: menu).state = controller.preferences.detectSilentStream ? .on : .off
+        item("播放时提示恢复", #selector(toggleRecoveryFromMenu), in: menu).state = controller.preferences.recoveryPromptEnabled ? .on : .off
         item("保护设备…", #selector(showDeviceSettings), in: menu)
         item("重新核对", #selector(retry), in: menu)
         menu.addItem(.separator())
@@ -49,6 +50,10 @@ extension AppDelegate {
     @objc func toggleSignalFromMenu() {
         let control = NSSwitch(); control.state = controller.preferences.detectSilentStream ? .off : .on
         changeSignal(control)
+    }
+    @objc func toggleRecoveryFromMenu() {
+        let control = NSSwitch(); control.state = controller.preferences.recoveryPromptEnabled ? .off : .on
+        changeRecoveryPrompt(control)
     }
     @objc func openReleases() { NSWorkspace.shared.open(URL(string: repository + "/releases")!) }
 }

@@ -46,8 +46,11 @@ struct Property: Hashable {
         return Array(result.prefix(Int(size / 4)))
     }
     func writeZero() throws {
-        var a = address; var zero: Float32 = 0
-        try check(AudioObjectSetPropertyData(object, &a, 0, nil, 4, &zero), "音量归零")
+        try write(0, operation: "音量归零")
+    }
+    func write(_ value: Float32, operation: String) throws {
+        var a = address; var value = value
+        try check(AudioObjectSetPropertyData(object, &a, 0, nil, 4, &value), operation)
     }
 }
 

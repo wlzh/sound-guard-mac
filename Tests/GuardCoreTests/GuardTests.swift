@@ -44,6 +44,7 @@ final class PolicyTests: XCTestCase {
     func testDefaultSettings() {
         let p = Preferences(); XCTAssertEqual(p.timeout, 300); XCTAssertTrue(p.enabled)
         XCTAssertTrue(p.protectBuiltIn); XCTAssertFalse(p.detectSilentStream); XCTAssertTrue(p.selectedDevices.isEmpty)
+        XCTAssertFalse(p.recoveryPromptEnabled); XCTAssertEqual(p.recoveryPromptSeconds, 60)
     }
     func testTimeoutValidation() {
         for (minutes, seconds) in [(1, 60), (120, 7200), (0, 300), (-1, 300), (121, 300)] {
@@ -52,7 +53,25 @@ final class PolicyTests: XCTestCase {
     }
     func testPreferencesRoundTrip() throws {
         var p = Preferences(); p.minutes = 17; p.detectSilentStream = true; p.selectedDevices["uid|route"] = "Speaker"
+        p.recoveryPromptEnabled = true; p.recoveryPromptSeconds = 125
         XCTAssertEqual(Preferences.decode(try JSONEncoder().encode(p)), p)
+    }
+    func testLegacyPreferencesMigration() {
+        let old = Data(#"{"enabled":false,"minutes":17,"detectSilentStream":true,"protectBuiltIn":false,"selectedDevices":{"u|r":"USB"}}"#.utf8)
+        let p = Preferences.decode(old)
+        XCTAssertFalse(p.enabled); XCTAssertEqual(p.minutes, 17); XCTAssertTrue(p.detectSilentStream)
+        XCTAssertFalse(p.protectBuiltIn); XCTAssertEqual(p.selectedDevices["u|r"], "USB")
+        XCTAssertFalse(p.recoveryPromptEnabled); XCTAssertEqual(p.recoveryPromptSeconds, 60)
+    }
+    func testRecoveryTimeoutValidation() {
+        for (seconds, expected) in [(5, 5), (600, 600), (4, 60), (601, 60)] {
+            var p = Preferences(); p.recoveryPromptSeconds = seconds
+            XCTAssertEqual(p.recoveryPromptTimeout, Double(expected))
+        }
+    }
+    func testVolumeSnapshotUsesVisibleMaximum() {
+        XCTAssertEqual(VolumeSnapshot(values: [0, 0.4]).displayVolume, 0.4)
+        XCTAssertEqual(VolumeSnapshot(values: []).displayVolume, 0)
     }
     func testCorruptPreferencesUseDefaults() { XCTAssertEqual(Preferences.decode(Data("bad".utf8)), Preferences()) }
     func testInvalidPersistedTimeoutSanitized() throws {
@@ -144,9 +163,11 @@ private final class FakeAudio: AudioService {
     var activity: Playback = .idle
     var monitored: OutputDevice?
     var signal = false
+    var sources: [PlaybackProcess] = []
     var writes = 0
+    var restoreWrites = 0
     var reads = 0
-    var failRead = false, failMonitor = false, failWrite = false, failStart = false
+    var failRead = false, failMonitor = false, failZeroMonitor = false, failWrite = false, failStart = false
     var starts = 0, stops = 0
     func start() throws { starts += 1; if failStart { throw GuardError("start") } }
     func stop() { stops += 1; monitored = nil }
@@ -155,13 +176,23 @@ private final class FakeAudio: AudioService {
     }
     func devices() throws -> [OutputDevice] { device.map { [$0] } ?? [] }
     func setMonitoring(device: OutputDevice?, signal: Bool) throws {
-        if failMonitor && device != nil { throw GuardError("monitor") }; monitored = device; self.signal = signal
+        if (failMonitor && device != nil) || (failZeroMonitor && device?.volume == 0) { throw GuardError("monitor") }
+        monitored = device; self.signal = signal
     }
     func playback(for device: OutputDevice, signal: Bool) throws -> Playback { activity }
-    func zero(_ expected: OutputDevice) throws {
+    func playingProcesses(for device: OutputDevice) throws -> [PlaybackProcess] { sources }
+    func zero(_ expected: OutputDevice) throws -> VolumeSnapshot {
         if failWrite { throw GuardError("write") }
         guard device == expected else { throw GuardError("changed") }
         writes += 1; device = speaker(0, id: expected.id, uid: expected.uid, route: expected.route, builtIn: expected.builtInSpeaker)
+        return VolumeSnapshot(values: [expected.volume])
+    }
+    func restore(_ expectedZero: OutputDevice, snapshot: VolumeSnapshot) throws {
+        let volume = snapshot.displayVolume
+        guard device == expectedZero, volume > 0, volume <= 1 else { throw GuardError("restore changed") }
+        restoreWrites += 1
+        device = speaker(volume, id: expectedZero.id, uid: expectedZero.uid, route: expectedZero.route,
+                         builtIn: expectedZero.builtInSpeaker, muted: expectedZero.muted)
     }
 }
 private final class FakeScheduler: GuardScheduler {
@@ -268,6 +299,72 @@ final class ControllerTests: XCTestCase {
         controller.start(); audio.activity = .unknown; audio.onChange?()
         XCTAssertNil(scheduler.action); XCTAssertEqual(audio.writes, 0)
     }
+    func testAutoZeroArmsRecoveryAndPromptsOnPlaybackEdge() throws {
+        var p = Preferences(); p.recoveryPromptEnabled = true; p.recoveryPromptSeconds = 45
+        controller.configure(p)
+        var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
+        controller.start(); time = 300; scheduler.action?()
+        XCTAssertEqual(controller.state, .zero); XCTAssertTrue(controller.recoveryMonitoringActive)
+        XCTAssertNotNil(audio.monitored); XCTAssertEqual(audio.signal, false)
+        audio.sources = [PlaybackProcess(pid: 123)]; audio.onChange?()
+        XCTAssertEqual(prompts.count, 1); XCTAssertEqual(prompts[0].volume, 0.4)
+        XCTAssertEqual(prompts[0].timeout, 45); XCTAssertEqual(prompts[0].processes, audio.sources)
+        audio.onChange?(); XCTAssertEqual(prompts.count, 1)
+        try controller.restoreVolume(for: prompts[0].id)
+        XCTAssertEqual(audio.restoreWrites, 1); XCTAssertEqual(audio.device?.volume, 0.4)
+        XCTAssertFalse(controller.recoveryMonitoringActive)
+    }
+    func testSynchronousRecoveryCallbackCannotResurrectContext() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        controller.onRecoveryPrompt = { [unowned self] prompt in try? self.controller.restoreVolume(for: prompt.id) }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 123)]; audio.onChange?()
+        XCTAssertEqual(audio.restoreWrites, 1); XCTAssertNil(controller.recoveryPromptID)
+        XCTAssertFalse(controller.recoveryMonitoringActive)
+    }
+    func testRecoveryCanPromptAgainOnlyAfterPlaybackStops() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?(); audio.onChange?()
+        audio.sources = []; audio.onChange?(); audio.sources = [PlaybackProcess(pid: 2)]; audio.onChange?()
+        XCTAssertEqual(prompts.count, 2)
+    }
+    func testManualZeroNeverArmsRecovery() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        audio.activity = .playing; controller.start(); controller.zeroNow()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        XCTAssertFalse(controller.recoveryMonitoringActive)
+    }
+    func testRecoveryRejectsChangedDeviceOrVolume() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        var prompt: RecoveryPrompt?; controller.onRecoveryPrompt = { prompt = $0 }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        audio.device = speaker(0, id: 2); audio.onChange?(); XCTAssertNil(controller.recoveryPromptID)
+        do { try controller.restoreVolume(for: prompt!.id); XCTAssertTrue(false) }
+        catch { XCTAssertEqual(audio.restoreWrites, 0) }
+    }
+    func testDisablingRecoveryReleasesZeroVolumeMonitor() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        controller.start(); time = 300; scheduler.action?(); XCTAssertTrue(controller.recoveryMonitoringActive)
+        p.recoveryPromptEnabled = false; controller.configure(p)
+        XCTAssertFalse(controller.recoveryMonitoringActive); XCTAssertNil(audio.monitored)
+    }
+    func testRecoveryListenerFailureDoesNotInvalidateSuccessfulZero() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        controller.start(); audio.failZeroMonitor = true; time = 300; scheduler.action?()
+        XCTAssertEqual(controller.state, .zero); XCTAssertEqual(audio.device?.volume, 0)
+        XCTAssertFalse(controller.recoveryMonitoringActive); XCTAssertNil(controller.recoveryPromptID)
+    }
+    func testSleepOrMissingDeviceInvalidatesRecovery() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        controller.start(); time = 300; scheduler.action?(); XCTAssertNotNil(controller.recoveryPromptID)
+        controller.setSleeping(true); XCTAssertNil(controller.recoveryPromptID)
+        controller.setSleeping(false); audio.device = speaker(); audio.onChange?(); time = 600; scheduler.action?()
+        XCTAssertNotNil(controller.recoveryPromptID)
+        audio.device = nil; audio.onChange?(); XCTAssertNil(controller.recoveryPromptID)
+    }
 }
 
 final class MeterTests: XCTestCase {
@@ -340,6 +437,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("status presentation", policyTests.testStatusPresentation),
         ("defaults", policyTests.testDefaultSettings), ("timeout bounds", policyTests.testTimeoutValidation),
         ("preferences persistence", policyTests.testPreferencesRoundTrip), ("corrupt preferences", policyTests.testCorruptPreferencesUseDefaults),
+        ("legacy preferences migration", policyTests.testLegacyPreferencesMigration), ("recovery timeout bounds", policyTests.testRecoveryTimeoutValidation),
+        ("volume snapshot display", policyTests.testVolumeSnapshotUsesVisibleMaximum),
         ("invalid saved timeout", policyTests.testInvalidPersistedTimeoutSanitized), ("built-in default", policyTests.testDefaultOnlyBuiltIn),
         ("stable identity", policyTests.testDeviceIdentityNotName), ("disable built-in", policyTests.testBuiltInCanBeDisabled),
         ("exact deadline", policyTests.testInitialGraceAndExactDeadline), ("continuous playback", policyTests.testPlayingNeverHasDeadline),
@@ -359,7 +458,15 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("listener failure", controllerTests.testListenerFailureDoesNotMute), ("start failure", controllerTests.testStartFailureVisible),
         ("manual zero", controllerTests.testManualZeroAllowedDuringPlayback), ("manual excluded", controllerTests.testManualZeroRejectsExcluded),
         ("never restore", controllerTests.testRestorePlaybackNeverWritesNonzero), ("external selection", controllerTests.testSelectedExternalGetsProtectionAndUnselectStops),
-        ("unknown playback", controllerTests.testUnknownPlaybackCancels)
+        ("unknown playback", controllerTests.testUnknownPlaybackCancels),
+        ("recovery playback edge", controllerTests.testAutoZeroArmsRecoveryAndPromptsOnPlaybackEdge),
+        ("recovery callback reentrancy", controllerTests.testSynchronousRecoveryCallbackCannotResurrectContext),
+        ("recovery next playback", controllerTests.testRecoveryCanPromptAgainOnlyAfterPlaybackStops),
+        ("manual zero no recovery", controllerTests.testManualZeroNeverArmsRecovery),
+        ("recovery changed device", controllerTests.testRecoveryRejectsChangedDeviceOrVolume),
+        ("disable recovery", controllerTests.testDisablingRecoveryReleasesZeroVolumeMonitor),
+        ("recovery listener isolation", controllerTests.testRecoveryListenerFailureDoesNotInvalidateSuccessfulZero),
+        ("recovery lifecycle invalidation", controllerTests.testSleepOrMissingDeviceInvalidatesRecovery)
     ]),
     (meterTests, [("tap configuration", meterTests.testTapConfigurationDoesNotMuteOrCaptureMicrophone),
                   ("signal startup", meterTests.testSignalStartupGrace), ("signal absent", meterTests.testSignalMissingCallbacksFail),

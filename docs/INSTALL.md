@@ -1,14 +1,14 @@
 # 安装与卸载
 
-v0.2.2 / build 4，开发预览；macOS 14.2+，Universal arm64/x86_64。当前本机验证平台 macOS 15.6 / Apple Silicon，其他平台需实机验证。
+v0.3.0 / build 5，开发预览；macOS 14.2+，Universal arm64/x86_64。当前已验证的硬件结论仍来自旧版 Apple Silicon 测试，其他平台及新增功能需实机验证。
 
 ## 安装
 
-从 [公开 Release](https://github.com/wlzh/sound-guard-mac/releases) 下载 `SoundGuard-v0.2.2-macos-universal.zip` 和 SHA256.txt，在同一目录执行 `shasum -a 256 -c SHA256.txt`。解压后把 Sound Guard.app 放入 `/Applications` 或 `~/Applications` 再打开。
+从 [公开 Release](https://github.com/wlzh/sound-guard-mac/releases) 下载 `SoundGuard-v0.3.0-macos-universal.zip` 和 SHA256.txt，在同一目录执行 `shasum -a 256 -c SHA256.txt`。解压后把 Sound Guard.app 放入 `/Applications` 或 `~/Applications` 再打开。
 
 当前 ad-hoc 签名，没有 Apple Developer ID 和公证。若 macOS 拦截，在确认来源和校验和后按系统“隐私与安全性”提供的允许打开流程操作；不建议全局关闭 Gatekeeper。升级前退出旧实例，再替换 App，不同时运行两份。
 
-源码构建：在项目根运行 `zsh scripts/test-all.sh` 和 `zsh scripts/build-app.sh`，产物位于 `dist/Sound Guard.app`。默认模式无需录音权限；严格模式在非零音量启用后才会访问系统音频。
+源码构建：在项目根运行 `zsh scripts/test-all.sh` 和 `zsh scripts/build-app.sh`，产物位于 `dist/Sound Guard.app`。默认模式无需录音权限；严格模式在非零音量启用后才会访问系统音频。恢复提醒关闭时不请求辅助功能；开启时系统会提示授权，拒绝后仍可运行并回退到鼠标所在屏幕。
 
 ## 卸载
 

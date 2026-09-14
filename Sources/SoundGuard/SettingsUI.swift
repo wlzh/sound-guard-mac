@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import ServiceManagement
 import GuardCore
 
@@ -16,7 +17,8 @@ extension AppDelegate {
     }
     func rebuildSettings() {
         guard let window = settings else { return }
-        minutesField = nil; deviceButtons.removeAll(); deviceNames.removeAll()
+        minutesField = nil; recoveryDurationField = nil; recoveryUnitPopup = nil
+        deviceButtons.removeAll(); deviceNames.removeAll()
         let root = NativeSurface(frame: window.contentView!.bounds); root.autoresizingMask = [.width, .height]
         let heading = UI.stack([
             UI.image(BrandAssets.icon(size: 48), size: 48),
@@ -27,7 +29,7 @@ extension AppDelegate {
         tabs.setWidth(110, forSegment: 0); tabs.setWidth(110, forSegment: 1)
         tabs.setAccessibilityLabel("设置分类")
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true
-        let footer = UI.label("只将音量归零，不会自动恢复音量。", size: 12, color: .secondaryLabelColor, centered: true)
+        let footer = UI.label("未经你点击确认，声音守卫不会恢复音量。", size: 12, color: .secondaryLabelColor, centered: true)
         settingsFeedback = footer
         for view in [heading, tabs, scroll, footer] { view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view) }
         NSLayoutConstraint.activate([
@@ -60,14 +62,59 @@ extension AppDelegate {
         let input = UI.stack([field, UI.label("分钟", size: 12), NSButton(title: "应用", target: self, action: #selector(applyMinutes))], vertical: false, spacing: 7)
         let delay = UI.row(title: "空闲时长", detail: "停止播放后等待 1–120 分钟。", control: input)
         let signal = UI.row(title: "静音流也计时", detail: "进一步识别持续输出、但内容全为静音的音频流。", control: toggle("静音流也计时", on: p.detectSilentStream, action: #selector(changeSignal(_:))))
+        let recovery = UI.row(title: "播放时提示恢复", detail: "仅在声音守卫自动归零后，发现新的播放活动时提示。", control: toggle("播放时提示恢复", on: p.recoveryPromptEnabled, action: #selector(changeRecoveryPrompt(_:))))
+        let useMinutes = p.recoveryPromptSeconds >= 60 && p.recoveryPromptSeconds % 60 == 0
+        let recoveryField = NSTextField(string: String(useMinutes ? p.recoveryPromptSeconds / 60 : p.recoveryPromptSeconds))
+        recoveryField.alignment = .center; recoveryField.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        recoveryField.setAccessibilityLabel("恢复提示倒计时时长")
+        let unit = NSPopUpButton(); unit.addItems(withTitles: ["秒", "分钟"]); unit.selectItem(at: useMinutes ? 1 : 0)
+        let recoveryInput = UI.stack([recoveryField, unit, NSButton(title: "应用", target: self, action: #selector(applyRecoveryDuration))], vertical: false, spacing: 7)
+        recoveryDurationField = recoveryField; recoveryUnitPopup = unit
+        let recoveryDelay = UI.row(title: "提示停留", detail: "5 秒至 10 分钟；超时后保持静音。", control: recoveryInput)
+        let permissionButton = NSButton(title: "权限设置…", target: self, action: #selector(openAccessibilitySettings))
+        permissionButton.isEnabled = p.recoveryPromptEnabled
+        let permissionDetail = !p.recoveryPromptEnabled ? "功能关闭时不申请辅助功能权限。" : PlaybackScreenLocator.trusted ? "辅助功能已授权，优先显示在播放 App 所在屏幕。" : "未授权时回退到鼠标所在屏幕，不影响自动归零。"
+        let permission = UI.row(title: "定位播放窗口", detail: permissionDetail, control: permissionButton)
         let loginStatus = SMAppService.mainApp.status
         let login = UI.row(title: "登录时启动", detail: loginStatus == .requiresApproval ? "等待系统批准，请检查登录项。" : "登录后在菜单栏提供保护。", control: toggle("登录时启动", on: loginStatus == .enabled || loginStatus == .requiresApproval, action: #selector(changeLogin(_:))))
         return UI.stack([
             UI.section("自动归零"), UI.group([enable, delay]),
             UI.section("进阶检测"), UI.group([signal]),
-            UI.label("默认关闭。开启后会读取系统音频信号，需要相应权限，并增加少量运行开销。两种模式在音量为 0 时都会停止检测。", size: 12, color: .secondaryLabelColor),
+            UI.label("默认关闭。开启后会读取系统音频信号，需要相应权限，并增加少量运行开销。音量为 0 时停止信号分析；若启用恢复提醒，只保留播放事件监听。", size: 12, color: .secondaryLabelColor),
+            UI.section("音量恢复提醒"), UI.group([recovery, recoveryDelay, permission]),
+            UI.label("此功能默认关闭。开启后，只有由声音守卫自动归零时才保存本次原音量；手动归零不提示。恢复前会再次核对设备和音量。", size: 12, color: .secondaryLabelColor),
             UI.section("启动"), UI.group([login])
         ], spacing: 12)
+    }
+    @objc func changeRecoveryPrompt(_ sender: NSSwitch) {
+        if sender.state == .on {
+            let alert = NSAlert(); alert.messageText = "开启播放恢复提醒？"
+            alert.informativeText = "自动归零后会保留低开销的播放事件监听。检测到新的播放活动时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。"
+            alert.addButton(withTitle: "开启并继续"); alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { sender.state = .off; return }
+        }
+        var p = controller.preferences; p.recoveryPromptEnabled = sender.state == .on; save(p)
+        if sender.state == .on, !PlaybackScreenLocator.trusted { PlaybackScreenLocator.requestPermission() }
+        recoveryPresenter.close(); rebuildSettings()
+    }
+    @objc func applyRecoveryDuration() {
+        guard let raw = recoveryDurationField?.stringValue, let amount = Int(raw) else {
+            showError("请输入有效的整数时长"); return
+        }
+        let seconds: Int
+        if recoveryUnitPopup?.indexOfSelectedItem == 1 {
+            let multiplied = amount.multipliedReportingOverflow(by: 60)
+            guard !multiplied.overflow else { showError("请输入 5 秒至 10 分钟"); return }
+            seconds = multiplied.partialValue
+        } else { seconds = amount }
+        guard (5...600).contains(seconds) else { showError("请输入 5 秒至 10 分钟"); return }
+        var p = controller.preferences; p.recoveryPromptSeconds = seconds; save(p)
+        settingsFeedback?.stringValue = "已保存，恢复提示停留 \(seconds) 秒。"
+    }
+    @objc func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
     func deviceSettingsPage() -> NSStackView {
         let p = controller.preferences

@@ -26,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var statusObserver: NSObjectProtocol?
     var selectedSettingsPage = 0
     var settingsFeedback: NSTextField?
+    var recoveryDurationField: NSTextField?
+    var recoveryUnitPopup: NSPopUpButton?
+    let recoveryPresenter = RecoveryPromptPresenter()
     var previewDevices: [OutputDevice]?
     var previewCurrent: OutputDevice?
     var previewState: GuardState?
@@ -44,6 +47,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         status.button?.setAccessibilityLabel("声音守卫：声波盾牌")
         let menu = NSMenu(); menu.delegate = self; status.menu = menu
         controller.onUpdate = { [weak self] in self?.updateStatus() }
+        recoveryPresenter.onRestore = { [weak self] prompt in
+            do { try self?.controller.restoreVolume(for: prompt.id) }
+            catch { self?.showError(error.localizedDescription) }
+        }
+        controller.onRecoveryPrompt = { [weak self] prompt in self?.recoveryPresenter.show(prompt) }
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             self?.controller.setSleeping(true)
@@ -58,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func applicationWillTerminate(_ notification: Notification) {
         controller.stop()
+        recoveryPresenter.close()
         observers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         if lockFD >= 0 { close(lockFD); lockFD = -1 }
         if let statusObserver { DistributedNotificationCenter.default().removeObserver(statusObserver) }
@@ -69,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "enabled": controller.preferences.enabled, "minutes": controller.preferences.minutes,
             "monitorActive": controller.monitorActive, "listeners": audio.listenerCount,
             "playbackListeners": audio.playbackListenerCount, "signalActive": audio.signalActive,
+            "recoveryMonitoringActive": controller.recoveryMonitoringActive,
             "lastAction": controller.lastAction]
         do {
             let file = statusDirectory.appendingPathComponent("status.json")
@@ -76,7 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         } catch { /* On-demand diagnostics must never affect protection. */ }
     }
-    func updateStatus() { status?.button?.toolTip = "声音守卫：" + stateText }
+    func updateStatus() {
+        status?.button?.toolTip = "声音守卫：" + stateText
+        if let visible = recoveryPresenter.currentPromptID, controller.recoveryPromptID != visible {
+            recoveryPresenter.close()
+        }
+    }
     var stateText: String {
         switch controller.state {
         case .paused: return "保护已暂停"
@@ -84,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .unavailable: return "没有可用输出设备"
         case .excluded: return "当前设备未启用保护"
         case .unsupported: return "当前设备不支持软件音量控制"
-        case .zero: return "音量为 0，检测已休眠"
+        case .zero: return controller.recoveryMonitoringActive ? "音量为 0，等待新的播放活动" : "音量为 0，检测已休眠"
         case .muted: return "系统已静音，检测已休眠"
         case .playing: return "有播放活动，保持当前音量"
         case .waiting(let deadline):
@@ -115,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        if window === settings { settings = nil; minutesField = nil; settingsFeedback = nil; deviceButtons.removeAll(); deviceNames.removeAll() }
+        if window === settings { settings = nil; minutesField = nil; recoveryDurationField = nil; recoveryUnitPopup = nil; settingsFeedback = nil; deviceButtons.removeAll(); deviceNames.removeAll() }
         if window === about { about = nil }
     }
     func present(_ window: NSWindow) { NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil) }
@@ -213,6 +228,24 @@ if CommandLine.arguments.contains("--status") {
     }
     print("ZERO_PROBE=\(valid ? "PASS" : "ABORTED_NONZERO_OR_FAULT") elapsed=\(elapsed) cpuPercent=\((cpu(after) - cpu(before)) / elapsed * 100) peakRSSMiB=\(Double(after.ru_maxrss) / 1048576) baselineListeners=\(audio.listenerCount) playbackListeners=\(audio.playbackListenerCount) signal=\(audio.signalActive)")
     controller.stop(); exit(valid ? 0 : 1)
+} else if let index = CommandLine.arguments.firstIndex(of: "--probe-recovery-monitor"), CommandLine.arguments.count > index + 1,
+          let seconds = Double(CommandLine.arguments[index + 1]), (1...3600).contains(seconds) {
+    let audio = SystemAudio()
+    guard let device = try audio.currentDevice(), device.controllable, device.volume == 0 else {
+        print("RECOVERY_PROBE=ABORTED_REQUIRES_ZERO_VOLUME; no volume was changed"); exit(1)
+    }
+    var before = rusage(); getrusage(RUSAGE_SELF, &before)
+    let start = ProcessInfo.processInfo.systemUptime
+    do { try audio.start(); try audio.setMonitoring(device: device, signal: false) }
+    catch { print("RECOVERY_PROBE=FAILED error=\(error.localizedDescription)"); audio.stop(); exit(1) }
+    RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    let elapsed = ProcessInfo.processInfo.systemUptime - start
+    var after = rusage(); getrusage(RUSAGE_SELF, &after)
+    func cpu(_ r: rusage) -> Double {
+        Double(r.ru_utime.tv_sec + r.ru_stime.tv_sec) + Double(r.ru_utime.tv_usec + r.ru_stime.tv_usec) / 1_000_000
+    }
+    print("RECOVERY_PROBE=PASS elapsed=\(elapsed) cpuPercent=\((cpu(after) - cpu(before)) / elapsed * 100) peakRSSMiB=\(Double(after.ru_maxrss) / 1048576) listeners=\(audio.listenerCount) playbackListeners=\(audio.playbackListenerCount) signal=\(audio.signalActive)")
+    try? audio.setMonitoring(device: nil, signal: false); audio.stop(); exit(0)
 } else if CommandLine.arguments.contains("--diagnose") {
     let audio = SystemAudio()
     do {
