@@ -343,6 +343,9 @@ final class ControllerTests: XCTestCase {
         XCTAssertTrue(prompts.isEmpty)
         audio.activity = .playing; audio.onChange?()
         XCTAssertEqual(prompts.count, 1); XCTAssertEqual(prompts[0].processes, audio.sources)
+        audio.onChange?(); XCTAssertEqual(prompts.count, 1)
+        audio.activity = .idle; audio.onChange?()
+        audio.activity = .playing; audio.onChange?(); XCTAssertEqual(prompts.count, 2)
     }
     func testSilentStreamRecoveryFailureKeepsSuccessfulZero() {
         var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
@@ -351,6 +354,21 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .zero); XCTAssertEqual(audio.device?.volume, 0)
         XCTAssertNil(controller.recoveryPromptID); XCTAssertFalse(controller.recoveryMonitoringActive)
         XCTAssertNil(audio.monitored)
+    }
+    func testChangingRecoveryDetectionModeInvalidatesContext() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
+        var prompts = 0; controller.onRecoveryPrompt = { _ in prompts += 1 }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1)]
+        p.detectSilentStream = false; controller.configure(p)
+        XCTAssertNil(controller.recoveryPromptID); XCTAssertFalse(controller.recoveryMonitoringActive)
+        XCTAssertNil(audio.monitored); XCTAssertEqual(prompts, 0)
+    }
+    func testExcludingRecoveryDeviceInvalidatesContext() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        controller.start(); time = 300; scheduler.action?()
+        p.protectBuiltIn = false; controller.configure(p)
+        XCTAssertNil(controller.recoveryPromptID); XCTAssertNil(audio.monitored)
     }
     func testManualZeroNeverArmsRecovery() {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
@@ -422,6 +440,12 @@ final class MeterTests: XCTestCase {
         XCTAssertEqual(try health.evaluate(now: 3_000_000_000, buffer: 2_990_000_000, sound: 1_000_000_000, invalid: false), .playing)
         XCTAssertEqual(try health.evaluate(now: 3_500_000_000, buffer: 3_490_000_000, sound: 1_000_000_000, invalid: false), .idle)
     }
+    func testSignalPauseUsesSixHundredMillisecondDebounce() throws {
+        var health = SignalHealth(started: 1)
+        _ = try health.evaluate(now: 1_000_000_000, buffer: 999_000_000, sound: 900_000_000, invalid: false)
+        XCTAssertEqual(try health.evaluate(now: 1_499_999_999, buffer: 1_490_000_000, sound: 900_000_000, invalid: false), .playing)
+        XCTAssertEqual(try health.evaluate(now: 1_500_000_000, buffer: 1_490_000_000, sound: 900_000_000, invalid: false), .idle)
+    }
     func testSignalInvalidClockAndSamplesFail() {
         for (now, buffer, invalid): (UInt64, UInt64, Bool) in [(2, 3, false), (2, 1, true)] {
             var health = SignalHealth(started: 1)
@@ -486,6 +510,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("recovery next playback", controllerTests.testRecoveryCanPromptAgainOnlyAfterPlaybackStops),
         ("silent stream recovery signal edge", controllerTests.testSilentStreamRecoveryWaitsForAudibleSignal),
         ("silent stream recovery failure isolation", controllerTests.testSilentStreamRecoveryFailureKeepsSuccessfulZero),
+        ("recovery detection mode invalidation", controllerTests.testChangingRecoveryDetectionModeInvalidatesContext),
+        ("recovery device exclusion invalidation", controllerTests.testExcludingRecoveryDeviceInvalidatesContext),
         ("manual zero no recovery", controllerTests.testManualZeroNeverArmsRecovery),
         ("recovery changed device", controllerTests.testRecoveryRejectsChangedDeviceOrVolume),
         ("disable recovery", controllerTests.testDisablingRecoveryReleasesZeroVolumeMonitor),
@@ -496,6 +522,7 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
                   ("signal startup", meterTests.testSignalStartupGrace), ("signal absent", meterTests.testSignalMissingCallbacksFail),
                   ("signal stale", meterTests.testSignalStaleCallbacksFail), ("signal silence", meterTests.testSignalDigitalSilenceTransitions),
                   ("signal delayed poll", meterTests.testSignalShortSoundRetainedAcrossDelayedPoll), ("signal corrupt", meterTests.testSignalInvalidClockAndSamplesFail),
+                  ("signal pause debounce", meterTests.testSignalPauseUsesSixHundredMillisecondDebounce),
                   ("digital silence", meterTests.testDigitalSilence), ("quiet sound", meterTests.testQuietSoundIsNotSilence),
                   ("invalid samples", meterTests.testInvalidSamples), ("missing callback", meterTests.testMissingBufferIsNotSilenceEvidence)])
 ]

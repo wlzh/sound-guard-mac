@@ -59,8 +59,10 @@ public final class GuardController {
         recoveryMonitoringActive = false; recovery = nil
     }
     public func configure(_ value: Preferences) {
+        let detectionModeChanged = value.detectSilentStream != preferences.detectSilentStream
         preferences = value; writeFault = nil; policy.reset()
-        if !value.enabled || !value.recoveryPromptEnabled { recovery = nil }
+        if !value.enabled || !value.recoveryPromptEnabled || detectionModeChanged ||
+           recovery.map({ !value.includes($0.zeroDevice) }) == true { recovery = nil }
         refresh()
     }
     public func setSleeping(_ value: Bool) {
