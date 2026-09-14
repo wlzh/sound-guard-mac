@@ -167,7 +167,7 @@ private final class FakeAudio: AudioService {
     var writes = 0
     var restoreWrites = 0
     var reads = 0
-    var failRead = false, failMonitor = false, failZeroMonitor = false, failWrite = false, failStart = false
+    var failRead = false, failMonitor = false, failZeroMonitor = false, failWrite = false, failStart = false, failPlayback = false
     var starts = 0, stops = 0
     func start() throws { starts += 1; if failStart { throw GuardError("start") } }
     func stop() { stops += 1; monitored = nil }
@@ -179,7 +179,10 @@ private final class FakeAudio: AudioService {
         if (failMonitor && device != nil) || (failZeroMonitor && device?.volume == 0) { throw GuardError("monitor") }
         monitored = device; self.signal = signal
     }
-    func playback(for device: OutputDevice, signal: Bool) throws -> Playback { activity }
+    func playback(for device: OutputDevice, signal: Bool) throws -> Playback {
+        if failPlayback { throw GuardError("playback") }
+        return activity
+    }
     func playingProcesses(for device: OutputDevice) throws -> [PlaybackProcess] { sources }
     func zero(_ expected: OutputDevice) throws -> VolumeSnapshot {
         if failWrite { throw GuardError("write") }
@@ -330,6 +333,25 @@ final class ControllerTests: XCTestCase {
         audio.sources = []; audio.onChange?(); audio.sources = [PlaybackProcess(pid: 2)]; audio.onChange?()
         XCTAssertEqual(prompts.count, 2)
     }
+    func testSilentStreamRecoveryWaitsForAudibleSignal() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
+        var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
+        controller.start(); time = 300; scheduler.action?()
+        XCTAssertTrue(controller.recoveryMonitoringActive); XCTAssertTrue(audio.signal)
+        audio.sources = [PlaybackProcess(pid: 1)]
+        audio.activity = .idle; audio.onChange?()
+        XCTAssertTrue(prompts.isEmpty)
+        audio.activity = .playing; audio.onChange?()
+        XCTAssertEqual(prompts.count, 1); XCTAssertEqual(prompts[0].processes, audio.sources)
+    }
+    func testSilentStreamRecoveryFailureKeepsSuccessfulZero() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
+        controller.start(); time = 300; scheduler.action?()
+        audio.failPlayback = true; audio.onChange?()
+        XCTAssertEqual(controller.state, .zero); XCTAssertEqual(audio.device?.volume, 0)
+        XCTAssertNil(controller.recoveryPromptID); XCTAssertFalse(controller.recoveryMonitoringActive)
+        XCTAssertNil(audio.monitored)
+    }
     func testManualZeroNeverArmsRecovery() {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
         audio.activity = .playing; controller.start(); controller.zeroNow()
@@ -462,6 +484,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("recovery playback edge", controllerTests.testAutoZeroArmsRecoveryAndPromptsOnPlaybackEdge),
         ("recovery callback reentrancy", controllerTests.testSynchronousRecoveryCallbackCannotResurrectContext),
         ("recovery next playback", controllerTests.testRecoveryCanPromptAgainOnlyAfterPlaybackStops),
+        ("silent stream recovery signal edge", controllerTests.testSilentStreamRecoveryWaitsForAudibleSignal),
+        ("silent stream recovery failure isolation", controllerTests.testSilentStreamRecoveryFailureKeepsSuccessfulZero),
         ("manual zero no recovery", controllerTests.testManualZeroNeverArmsRecovery),
         ("recovery changed device", controllerTests.testRecoveryRejectsChangedDeviceOrVolume),
         ("disable recovery", controllerTests.testDisablingRecoveryReleasesZeroVolumeMonitor),

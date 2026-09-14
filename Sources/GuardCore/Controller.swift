@@ -93,7 +93,7 @@ public final class GuardController {
             let recovering = !active && recovery != nil && device?.volume == 0
             do {
                 try audio.setMonitoring(device: active || recovering ? device : nil,
-                                        signal: active && preferences.detectSilentStream)
+                                        signal: (active || recovering) && preferences.detectSilentStream)
             } catch where recovering {
                 recovery = nil
                 try? audio.setMonitoring(device: nil, signal: false)
@@ -116,7 +116,9 @@ public final class GuardController {
                    zeroDevice.volume == 0, !zeroDevice.muted {
                     recovery = RecoveryContext(id: UUID(), zeroDevice: zeroDevice, originalVolume: previousVolume)
                     do {
-                        try audio.setMonitoring(device: zeroDevice, signal: false)
+                        // Strict mode must keep the existing tap so a persistent silent stream is
+                        // distinguished from new audible samples after automatic zeroing.
+                        try audio.setMonitoring(device: zeroDevice, signal: preferences.detectSilentStream)
                         recoveryMonitoringActive = true
                     } catch {
                         recovery = nil; recoveryMonitoringActive = false
@@ -129,7 +131,17 @@ public final class GuardController {
                 monitorActive = false; state = .zero
             } else if recovering, var saved = recovery, let current = self.device {
                 let processes = (try? audio.playingProcesses(for: current)) ?? []
-                let playing = !processes.isEmpty
+                let playing: Bool
+                if preferences.detectSilentStream {
+                    guard let strictPlayback = try? audio.playback(for: current, signal: true) else {
+                        recovery = nil; recoveryMonitoringActive = false
+                        try? audio.setMonitoring(device: nil, signal: false)
+                        onUpdate?(); return
+                    }
+                    playing = strictPlayback == .playing
+                } else {
+                    playing = !processes.isEmpty
+                }
                 var prompt: RecoveryPrompt?
                 if playing && !saved.playbackWasActive {
                     prompt = RecoveryPrompt(id: saved.id, deviceName: current.name,
