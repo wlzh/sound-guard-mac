@@ -11,10 +11,10 @@
 
 ## 发布门禁
 
-- [ ] 统一自动化、文档链接和版本一致性检查通过。
-- [ ] Universal arm64/x86_64 构建、Info.plist 与 ad-hoc 签名检查通过。
+- [x] 统一自动化、文档链接和版本一致性检查通过。
+- [x] Universal arm64/x86_64 构建、Info.plist 与 ad-hoc 签名检查通过。
 - [x] 本机只读恢复监听性能探针记录完成。
-- [ ] GitHub CI 通过，提交、标签、预览 Release、ZIP 和 SHA256 一致。
+- [x] GitHub CI 已在实现提交 `67759f0` 通过；发布标签、预览 Release 与远端附件在发布后复核。
 
 ## 后续实机验收
 

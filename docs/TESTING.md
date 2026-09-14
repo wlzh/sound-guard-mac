@@ -8,6 +8,8 @@
 
 release Universal 构建（arm64/x86_64）、Info.plist 校验、ad-hoc 签名与 strict 验签已通过。只读诊断实测：当前内建扬声器可控，音量 0、已静音、无输出播放，发现 5 个输出设备。未保存设备名称/UID。
 
+实现提交 `67759f0` 的 GitHub Actions `macOS checks` 已通过：[run 34813228518](https://github.com/wlzh/sound-guard-mac/actions/runs/34813228518)。本地发布包 `SoundGuard-v0.3.0-macos-universal.zip` 的 SHA256 为 `9ff7a145f2f5706648a7e30927a2648272b502f0fbab60c06eab6ae493e9b465`；发布后还须从 GitHub Release 下载并复核远端附件。
+
 ## 实现阶段必须补充
 
 | 层级 | 覆盖范围 | 当前状态 |
