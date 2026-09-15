@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var settingsFeedback: NSTextField?
     var recoveryDurationField: NSTextField?
     var recoveryUnitPopup: NSPopUpButton?
+    var recoveryConfirmationField: NSTextField?
+    var recoveryConfirmationUnitPopup: NSPopUpButton?
     let recoveryPresenter = RecoveryPromptPresenter()
     var previewDevices: [OutputDevice]?
     var previewCurrent: OutputDevice?
@@ -83,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "monitorActive": controller.monitorActive, "listeners": audio.listenerCount,
             "playbackListeners": audio.playbackListenerCount, "signalActive": audio.signalActive,
             "recoveryMonitoringActive": controller.recoveryMonitoringActive,
+            "recoveryConfirmationActive": controller.recoveryConfirmationActive,
             "lastAction": controller.lastAction]
         do {
             let file = statusDirectory.appendingPathComponent("status.json")
@@ -103,7 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .unavailable: return "没有可用输出设备"
         case .excluded: return "当前设备未启用保护"
         case .unsupported: return "当前设备不支持软件音量控制"
-        case .zero: return controller.recoveryMonitoringActive ? "音量为 0，等待新的播放活动" : "音量为 0，检测已休眠"
+        case .zero:
+            if controller.recoveryConfirmationActive { return "音量为 0，正在确认新的播放活动" }
+            return controller.recoveryMonitoringActive ? "音量为 0，等待新的播放活动" : "音量为 0，检测已休眠"
         case .muted: return "系统已静音，检测已休眠"
         case .playing: return "有播放活动，保持当前音量"
         case .waiting(let deadline):
@@ -134,7 +139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        if window === settings { settings = nil; minutesField = nil; recoveryDurationField = nil; recoveryUnitPopup = nil; settingsFeedback = nil; deviceButtons.removeAll(); deviceNames.removeAll() }
+        if window === settings {
+            settings = nil; minutesField = nil; recoveryDurationField = nil; recoveryUnitPopup = nil
+            recoveryConfirmationField = nil; recoveryConfirmationUnitPopup = nil
+            settingsFeedback = nil; deviceButtons.removeAll(); deviceNames.removeAll()
+        }
         if window === about { about = nil }
     }
     func present(_ window: NSWindow) { NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil) }

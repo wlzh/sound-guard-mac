@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.3.3"
-    public static let build = "8"
+    public static let current = "0.3.4"
+    public static let build = "9"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -13,9 +13,13 @@ public struct Preferences: Codable, Equatable {
     public var selectedDevices: [String: String] = [:]
     public var recoveryPromptEnabled = false
     public var recoveryPromptSeconds = 60
+    public var recoveryPlaybackConfirmationMilliseconds = 2_000
     public init() {}
     public var timeout: TimeInterval { Double((1...120).contains(minutes) ? minutes : 5) * 60 }
     public var recoveryPromptTimeout: TimeInterval { Double((5...600).contains(recoveryPromptSeconds) ? recoveryPromptSeconds : 60) }
+    public var recoveryPlaybackConfirmation: TimeInterval {
+        Double((500...30_000).contains(recoveryPlaybackConfirmationMilliseconds) ? recoveryPlaybackConfirmationMilliseconds : 2_000) / 1_000
+    }
     public func includes(_ device: OutputDevice) -> Bool {
         device.builtInSpeaker ? protectBuiltIn : selectedDevices[device.selectionID] != nil
     }
@@ -23,11 +27,14 @@ public struct Preferences: Codable, Equatable {
         guard let data, var value = try? JSONDecoder().decode(Self.self, from: data) else { return .init() }
         if !(1...120).contains(value.minutes) { value.minutes = 5 }
         if !(5...600).contains(value.recoveryPromptSeconds) { value.recoveryPromptSeconds = 60 }
+        if !(500...30_000).contains(value.recoveryPlaybackConfirmationMilliseconds) {
+            value.recoveryPlaybackConfirmationMilliseconds = 2_000
+        }
         return value
     }
     private enum CodingKeys: String, CodingKey {
         case enabled, minutes, detectSilentStream, protectBuiltIn, selectedDevices
-        case recoveryPromptEnabled, recoveryPromptSeconds
+        case recoveryPromptEnabled, recoveryPromptSeconds, recoveryPlaybackConfirmationMilliseconds
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -38,6 +45,8 @@ public struct Preferences: Codable, Equatable {
         selectedDevices = try values.decodeIfPresent([String: String].self, forKey: .selectedDevices) ?? [:]
         recoveryPromptEnabled = try values.decodeIfPresent(Bool.self, forKey: .recoveryPromptEnabled) ?? false
         recoveryPromptSeconds = try values.decodeIfPresent(Int.self, forKey: .recoveryPromptSeconds) ?? 60
+        recoveryPlaybackConfirmationMilliseconds = try values.decodeIfPresent(
+            Int.self, forKey: .recoveryPlaybackConfirmationMilliseconds) ?? 2_000
     }
 }
 

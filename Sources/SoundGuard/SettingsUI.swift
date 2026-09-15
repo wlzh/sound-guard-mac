@@ -18,6 +18,7 @@ extension AppDelegate {
     func rebuildSettings() {
         guard let window = settings else { return }
         minutesField = nil; recoveryDurationField = nil; recoveryUnitPopup = nil
+        recoveryConfirmationField = nil; recoveryConfirmationUnitPopup = nil
         deviceButtons.removeAll(); deviceNames.removeAll()
         let root = NativeSurface(frame: window.contentView!.bounds); root.autoresizingMask = [.width, .height]
         let heading = UI.stack([
@@ -71,6 +72,23 @@ extension AppDelegate {
         let recoveryInput = UI.stack([recoveryField, unit, NSButton(title: "应用", target: self, action: #selector(applyRecoveryDuration))], vertical: false, spacing: 7)
         recoveryDurationField = recoveryField; recoveryUnitPopup = unit
         let recoveryDelay = UI.row(title: "提示停留", detail: "5 秒至 10 分钟；超时关闭，下次播放仍可提醒。", control: recoveryInput)
+        let confirmationMilliseconds = p.recoveryPlaybackConfirmationMilliseconds
+        let useMilliseconds = confirmationMilliseconds % 1_000 != 0
+        let confirmationValue = useMilliseconds ? confirmationMilliseconds : confirmationMilliseconds / 1_000
+        let confirmationField = NSTextField(string: String(confirmationValue))
+        confirmationField.alignment = .center
+        confirmationField.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        confirmationField.setAccessibilityLabel("有声确认时长")
+        let confirmationUnit = NSPopUpButton()
+        confirmationUnit.addItems(withTitles: ["毫秒", "秒"])
+        confirmationUnit.selectItem(at: useMilliseconds ? 0 : 1)
+        let confirmationInput = UI.stack([
+            confirmationField, confirmationUnit,
+            NSButton(title: "应用", target: self, action: #selector(applyRecoveryConfirmationDuration))
+        ], vertical: false, spacing: 7)
+        recoveryConfirmationField = confirmationField
+        recoveryConfirmationUnitPopup = confirmationUnit
+        let confirmation = UI.row(title: "有声确认", detail: "持续 500 毫秒至 30 秒才提示；默认 2 秒。", control: confirmationInput)
         let permissionButton = NSButton(title: "权限设置…", target: self, action: #selector(openAccessibilitySettings))
         permissionButton.isEnabled = p.recoveryPromptEnabled
         let permissionDetail = !p.recoveryPromptEnabled ? "功能关闭时不申请辅助功能权限。" : PlaybackScreenLocator.trusted ? "辅助功能已授权，优先显示在播放 App 所在屏幕。" : "未授权时回退到鼠标所在屏幕，不影响自动归零。"
@@ -81,7 +99,7 @@ extension AppDelegate {
             UI.section("自动归零"), UI.group([enable, delay]),
             UI.section("进阶检测"), UI.group([signal]),
             UI.label("默认关闭。开启后读取系统音频信号，需要相应权限并增加运行开销。若同时开启恢复提醒，自动归零后会继续分析信号，区分静音流与真正有声；否则归零后停止检测。", size: 12, color: .secondaryLabelColor),
-            UI.section("音量恢复提醒"), UI.group([recovery, recoveryDelay, permission]),
+            UI.section("音量恢复提醒"), UI.group([recovery, confirmation, recoveryDelay, permission]),
             UI.label("此功能默认关闭。开启后，只有由声音守卫自动归零时才保存本次原音量；手动归零不提示。恢复前会再次核对设备和音量。", size: 12, color: .secondaryLabelColor),
             UI.section("启动"), UI.group([login])
         ], spacing: 12)
@@ -109,6 +127,25 @@ extension AppDelegate {
         guard (5...600).contains(seconds) else { showError("请输入 5 秒至 10 分钟"); return }
         var p = controller.preferences; p.recoveryPromptSeconds = seconds; save(p)
         settingsFeedback?.stringValue = "已保存，恢复提示停留 \(seconds) 秒。"
+    }
+    @objc func applyRecoveryConfirmationDuration() {
+        guard let raw = recoveryConfirmationField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
+              let amount = Double(raw.replacingOccurrences(of: ",", with: ".")), amount.isFinite, amount > 0 else {
+            showError("请输入有效的有声确认时长"); return
+        }
+        let rawMilliseconds = recoveryConfirmationUnitPopup?.indexOfSelectedItem == 1 ? amount * 1_000 : amount
+        guard rawMilliseconds >= 500, rawMilliseconds <= 30_000 else {
+            showError("请输入 500 毫秒至 30 秒"); return
+        }
+        let milliseconds = Int(rawMilliseconds.rounded())
+        var p = controller.preferences
+        p.recoveryPlaybackConfirmationMilliseconds = milliseconds
+        save(p)
+        settingsFeedback?.stringValue = "已保存，持续有声 \(formattedConfirmation(milliseconds)) 后才提示。"
+    }
+    private func formattedConfirmation(_ milliseconds: Int) -> String {
+        if milliseconds % 1_000 == 0 { return "\(milliseconds / 1_000) 秒" }
+        return "\(milliseconds) 毫秒"
     }
     @objc func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {

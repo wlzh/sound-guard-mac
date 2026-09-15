@@ -29,6 +29,7 @@ public final class GuardController {
     public private(set) var monitorActive = false
     public private(set) var recoveryMonitoringActive = false
     public var recoveryPromptID: UUID? { recovery?.id }
+    public var recoveryConfirmationActive: Bool { recovery?.candidateSince != nil }
     public private(set) var policy = IdlePolicy()
     private let audio: AudioService
     private let scheduler: GuardScheduler
@@ -42,6 +43,7 @@ public final class GuardController {
         let zeroDevice: OutputDevice
         let originalVolume: VolumeSnapshot
         var playbackWasActive = false
+        var candidateSince: TimeInterval?
     }
     private var recovery: RecoveryContext?
     public init(audio: AudioService, scheduler: GuardScheduler, preferences: Preferences = .init(),
@@ -60,9 +62,11 @@ public final class GuardController {
     }
     public func configure(_ value: Preferences) {
         let detectionModeChanged = value.detectSilentStream != preferences.detectSilentStream
+        let confirmationChanged = value.recoveryPlaybackConfirmationMilliseconds != preferences.recoveryPlaybackConfirmationMilliseconds
         preferences = value; writeFault = nil; policy.reset()
         if !value.enabled || !value.recoveryPromptEnabled || detectionModeChanged ||
            recovery.map({ !value.includes($0.zeroDevice) }) == true { recovery = nil }
+        else if confirmationChanged { recovery?.candidateSince = nil }
         refresh()
     }
     public func setSleeping(_ value: Bool) {
@@ -145,12 +149,28 @@ public final class GuardController {
                     playing = !processes.isEmpty
                 }
                 var prompt: RecoveryPrompt?
-                if playing && !saved.playbackWasActive {
-                    prompt = RecoveryPrompt(id: saved.id, deviceName: current.name,
-                        volume: saved.originalVolume.displayVolume, processes: processes,
-                        timeout: preferences.recoveryPromptTimeout)
+                if playing {
+                    if !saved.playbackWasActive {
+                        let instant = now()
+                        if saved.candidateSince == nil { saved.candidateSince = instant }
+                        let deadline = saved.candidateSince! + preferences.recoveryPlaybackConfirmation
+                        if instant >= deadline {
+                            saved.candidateSince = nil; saved.playbackWasActive = true
+                            prompt = RecoveryPrompt(id: saved.id, deviceName: current.name,
+                                volume: saved.originalVolume.displayVolume, processes: processes,
+                                timeout: preferences.recoveryPromptTimeout)
+                        } else {
+                            let token = generation
+                            scheduler.schedule(at: deadline) { [weak self] in
+                                guard let self, self.running, self.generation == token else { return }
+                                self.refresh()
+                            }
+                        }
+                    }
+                } else {
+                    saved.candidateSince = nil; saved.playbackWasActive = false
                 }
-                saved.playbackWasActive = playing; recovery = saved
+                recovery = saved
                 if let prompt { onRecoveryPrompt?(prompt) }
             } else if let deadline = policy.deadline {
                 let token = generation

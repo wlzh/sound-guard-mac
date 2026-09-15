@@ -45,6 +45,8 @@ final class PolicyTests: XCTestCase {
         let p = Preferences(); XCTAssertEqual(p.timeout, 300); XCTAssertTrue(p.enabled)
         XCTAssertTrue(p.protectBuiltIn); XCTAssertFalse(p.detectSilentStream); XCTAssertTrue(p.selectedDevices.isEmpty)
         XCTAssertFalse(p.recoveryPromptEnabled); XCTAssertEqual(p.recoveryPromptSeconds, 60)
+        XCTAssertEqual(p.recoveryPlaybackConfirmationMilliseconds, 2_000)
+        XCTAssertEqual(p.recoveryPlaybackConfirmation, 2)
     }
     func testTimeoutValidation() {
         for (minutes, seconds) in [(1, 60), (120, 7200), (0, 300), (-1, 300), (121, 300)] {
@@ -54,6 +56,7 @@ final class PolicyTests: XCTestCase {
     func testPreferencesRoundTrip() throws {
         var p = Preferences(); p.minutes = 17; p.detectSilentStream = true; p.selectedDevices["uid|route"] = "Speaker"
         p.recoveryPromptEnabled = true; p.recoveryPromptSeconds = 125
+        p.recoveryPlaybackConfirmationMilliseconds = 750
         XCTAssertEqual(Preferences.decode(try JSONEncoder().encode(p)), p)
     }
     func testLegacyPreferencesMigration() {
@@ -62,11 +65,22 @@ final class PolicyTests: XCTestCase {
         XCTAssertFalse(p.enabled); XCTAssertEqual(p.minutes, 17); XCTAssertTrue(p.detectSilentStream)
         XCTAssertFalse(p.protectBuiltIn); XCTAssertEqual(p.selectedDevices["u|r"], "USB")
         XCTAssertFalse(p.recoveryPromptEnabled); XCTAssertEqual(p.recoveryPromptSeconds, 60)
+        XCTAssertEqual(p.recoveryPlaybackConfirmationMilliseconds, 2_000)
     }
     func testRecoveryTimeoutValidation() {
         for (seconds, expected) in [(5, 5), (600, 600), (4, 60), (601, 60)] {
             var p = Preferences(); p.recoveryPromptSeconds = seconds
             XCTAssertEqual(p.recoveryPromptTimeout, Double(expected))
+        }
+    }
+    func testRecoveryConfirmationValidation() {
+        for (milliseconds, expected) in [(500, 0.5), (2_000, 2), (30_000, 30), (499, 2), (30_001, 2)] {
+            var p = Preferences(); p.recoveryPlaybackConfirmationMilliseconds = milliseconds
+            XCTAssertEqual(p.recoveryPlaybackConfirmation, expected)
+        }
+        for invalid in [499, 30_001] {
+            var p = Preferences(); p.recoveryPlaybackConfirmationMilliseconds = invalid
+            XCTAssertEqual(Preferences.decode(try! JSONEncoder().encode(p)).recoveryPlaybackConfirmationMilliseconds, 2_000)
         }
     }
     func testVolumeSnapshotUsesVisibleMaximum() {
@@ -213,6 +227,12 @@ final class ControllerTests: XCTestCase {
         controller = GuardController(audio: audio, scheduler: scheduler, now: { [unowned self] in self.time })
     }
     override func tearDown() { controller.stop(); controller = nil }
+    private func completeRecoveryConfirmation() {
+        guard let deadline = scheduler.deadline, let action = scheduler.action else {
+            XCTAssertTrue(false); return
+        }
+        time = deadline; action()
+    }
     func testAutoZeroAndRelease() {
         controller.start(); XCTAssertNotNil(audio.monitored); time = 300; scheduler.action?()
         XCTAssertEqual(audio.writes, 1); XCTAssertNil(audio.monitored); XCTAssertNil(scheduler.action)
@@ -310,6 +330,10 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .zero); XCTAssertTrue(controller.recoveryMonitoringActive)
         XCTAssertNotNil(audio.monitored); XCTAssertEqual(audio.signal, false)
         audio.sources = [PlaybackProcess(pid: 123)]; audio.onChange?()
+        XCTAssertTrue(prompts.isEmpty); XCTAssertTrue(controller.recoveryConfirmationActive)
+        XCTAssertEqual(scheduler.deadline, 302)
+        completeRecoveryConfirmation()
+        XCTAssertFalse(controller.recoveryConfirmationActive)
         XCTAssertEqual(prompts.count, 1); XCTAssertEqual(prompts[0].volume, 0.4)
         XCTAssertEqual(prompts[0].timeout, 45); XCTAssertEqual(prompts[0].processes, audio.sources)
         audio.onChange?(); XCTAssertEqual(prompts.count, 1)
@@ -321,7 +345,7 @@ final class ControllerTests: XCTestCase {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
         controller.onRecoveryPrompt = { [unowned self] prompt in try? self.controller.restoreVolume(for: prompt.id) }
         controller.start(); time = 300; scheduler.action?()
-        audio.sources = [PlaybackProcess(pid: 123)]; audio.onChange?()
+        audio.sources = [PlaybackProcess(pid: 123)]; audio.onChange?(); completeRecoveryConfirmation()
         XCTAssertEqual(audio.restoreWrites, 1); XCTAssertNil(controller.recoveryPromptID)
         XCTAssertFalse(controller.recoveryMonitoringActive)
     }
@@ -329,15 +353,39 @@ final class ControllerTests: XCTestCase {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
         var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
         controller.start(); time = 300; scheduler.action?()
-        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?(); audio.onChange?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?(); completeRecoveryConfirmation(); audio.onChange?()
         audio.sources = []; audio.onChange?(); audio.sources = [PlaybackProcess(pid: 2)]; audio.onChange?()
+        completeRecoveryConfirmation()
         XCTAssertEqual(prompts.count, 2)
+    }
+    func testRecoveryConfirmationResetsWhenPlaybackStops() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        var prompts = 0; controller.onRecoveryPrompt = { _ in prompts += 1 }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        let staleConfirmation = scheduler.action
+        XCTAssertEqual(scheduler.deadline, 302)
+        time = 301; audio.sources = []; audio.onChange?()
+        XCTAssertNil(scheduler.action); XCTAssertFalse(controller.recoveryConfirmationActive)
+        time = 302; staleConfirmation?(); XCTAssertEqual(prompts, 0)
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        XCTAssertEqual(scheduler.deadline, 304)
+        completeRecoveryConfirmation(); XCTAssertEqual(prompts, 1)
+    }
+    func testChangingRecoveryConfirmationRestartsCandidate() {
+        var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
+        var prompts = 0; controller.onRecoveryPrompt = { _ in prompts += 1 }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        time = 301; p.recoveryPlaybackConfirmationMilliseconds = 5_000; controller.configure(p)
+        XCTAssertEqual(scheduler.deadline, 306); XCTAssertEqual(prompts, 0)
+        completeRecoveryConfirmation(); XCTAssertEqual(prompts, 1)
     }
     func testKeepSilentConsumesRecoveryAndStopsMonitoring() {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
         var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
         controller.start(); time = 300; scheduler.action?()
-        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?(); completeRecoveryConfirmation()
         XCTAssertEqual(prompts.count, 1); XCTAssertNotNil(controller.recoveryPromptID)
         controller.keepSilent(for: UUID())
         XCTAssertNotNil(controller.recoveryPromptID); XCTAssertTrue(controller.recoveryMonitoringActive)
@@ -356,11 +404,11 @@ final class ControllerTests: XCTestCase {
         audio.sources = [PlaybackProcess(pid: 1)]
         audio.activity = .idle; audio.onChange?()
         XCTAssertTrue(prompts.isEmpty)
-        audio.activity = .playing; audio.onChange?()
+        audio.activity = .playing; audio.onChange?(); completeRecoveryConfirmation()
         XCTAssertEqual(prompts.count, 1); XCTAssertEqual(prompts[0].processes, audio.sources)
         audio.onChange?(); XCTAssertEqual(prompts.count, 1)
         audio.activity = .idle; audio.onChange?()
-        audio.activity = .playing; audio.onChange?(); XCTAssertEqual(prompts.count, 2)
+        audio.activity = .playing; audio.onChange?(); completeRecoveryConfirmation(); XCTAssertEqual(prompts.count, 2)
     }
     func testSilentStreamRecoveryFailureKeepsSuccessfulZero() {
         var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
@@ -395,7 +443,7 @@ final class ControllerTests: XCTestCase {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
         var prompt: RecoveryPrompt?; controller.onRecoveryPrompt = { prompt = $0 }
         controller.start(); time = 300; scheduler.action?()
-        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?(); completeRecoveryConfirmation()
         audio.device = speaker(0, id: 2); audio.onChange?(); XCTAssertNil(controller.recoveryPromptID)
         do { try controller.restoreVolume(for: prompt!.id); XCTAssertTrue(false) }
         catch { XCTAssertEqual(audio.restoreWrites, 0) }
@@ -499,6 +547,7 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("defaults", policyTests.testDefaultSettings), ("timeout bounds", policyTests.testTimeoutValidation),
         ("preferences persistence", policyTests.testPreferencesRoundTrip), ("corrupt preferences", policyTests.testCorruptPreferencesUseDefaults),
         ("legacy preferences migration", policyTests.testLegacyPreferencesMigration), ("recovery timeout bounds", policyTests.testRecoveryTimeoutValidation),
+        ("recovery confirmation bounds", policyTests.testRecoveryConfirmationValidation),
         ("volume snapshot display", policyTests.testVolumeSnapshotUsesVisibleMaximum),
         ("invalid saved timeout", policyTests.testInvalidPersistedTimeoutSanitized), ("built-in default", policyTests.testDefaultOnlyBuiltIn),
         ("stable identity", policyTests.testDeviceIdentityNotName), ("disable built-in", policyTests.testBuiltInCanBeDisabled),
@@ -523,6 +572,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("recovery playback edge", controllerTests.testAutoZeroArmsRecoveryAndPromptsOnPlaybackEdge),
         ("recovery callback reentrancy", controllerTests.testSynchronousRecoveryCallbackCannotResurrectContext),
         ("recovery next playback", controllerTests.testRecoveryCanPromptAgainOnlyAfterPlaybackStops),
+        ("recovery confirmation reset", controllerTests.testRecoveryConfirmationResetsWhenPlaybackStops),
+        ("recovery confirmation setting reset", controllerTests.testChangingRecoveryConfirmationRestartsCandidate),
         ("recovery keep silent consumes context", controllerTests.testKeepSilentConsumesRecoveryAndStopsMonitoring),
         ("silent stream recovery signal edge", controllerTests.testSilentStreamRecoveryWaitsForAudibleSignal),
         ("silent stream recovery failure isolation", controllerTests.testSilentStreamRecoveryFailureKeepsSuccessfulZero),

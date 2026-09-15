@@ -38,6 +38,7 @@ func runUIChecks(outputDirectory: URL?) throws {
     let generalViews = descendants(delegate.settings!.contentView!)
     precondition(generalViews.compactMap { $0 as? NSSwitch }.contains { $0.accessibilityLabel() == "播放时提示恢复" })
     precondition(delegate.recoveryDurationField?.stringValue == "1" && delegate.recoveryUnitPopup?.titleOfSelectedItem == "分钟")
+    precondition(delegate.recoveryConfirmationField?.stringValue == "2" && delegate.recoveryConfirmationUnitPopup?.titleOfSelectedItem == "秒")
     precondition(generalViews.compactMap { $0 as? NSButton }.contains { $0.title == "权限设置…" && !$0.isEnabled })
     if let scroll = generalViews.compactMap({ $0 as? NSScrollView }).first,
        let document = scroll.documentView {
@@ -45,6 +46,14 @@ func runUIChecks(outputDirectory: URL?) throws {
         scroll.reflectScrolledClipView(scroll.contentView)
         try render(delegate.settings?.contentView, name: "settings-recovery")
     }
+    delegate.recoveryConfirmationField?.stringValue = "0.5"
+    delegate.recoveryConfirmationUnitPopup?.selectItem(at: 1)
+    delegate.applyRecoveryConfirmationDuration()
+    precondition(delegate.controller.preferences.recoveryPlaybackConfirmationMilliseconds == 500)
+    delegate.recoveryConfirmationField?.stringValue = "750"
+    delegate.recoveryConfirmationUnitPopup?.selectItem(at: 0)
+    delegate.applyRecoveryConfirmationDuration()
+    precondition(delegate.controller.preferences.recoveryPlaybackConfirmationMilliseconds == 750)
     try render(delegate.about?.contentView, name: "about")
     let preview = NativeSurface(frame: NSRect(x: 0, y: 0, width: 316, height: 366))
     let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 2
@@ -139,5 +148,5 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
-    print("UI_CHECKS=PASS; ASSERTIONS=46; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
+    print("UI_CHECKS=PASS; ASSERTIONS=49; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }
