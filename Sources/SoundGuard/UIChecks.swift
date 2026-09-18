@@ -25,6 +25,10 @@ func runUIChecks(outputDirectory: URL?) throws {
     precondition(menu.items.contains { $0.title == "立即归零" && !$0.isEnabled })
     precondition(menu.items.contains { $0.title == "保护设备…" && $0.action == #selector(AppDelegate.showDeviceSettings) })
     precondition(menu.items.first?.view != nil)
+    delegate.previewState = .retrying
+    let retryingMenu = NSMenu(); delegate.menuWillOpen(retryingMenu)
+    precondition(retryingMenu.items.contains { $0.title == "重新核对" && !$0.isEnabled })
+    delegate.menuDidClose(retryingMenu); delegate.previewState = .zero
     func render(_ view: NSView?, name: String) throws {
         guard let directory = outputDirectory, let view else { return }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -148,5 +152,5 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
-    print("UI_CHECKS=PASS; ASSERTIONS=49; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
+    print("UI_CHECKS=PASS; ASSERTIONS=50; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }

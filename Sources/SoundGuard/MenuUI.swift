@@ -9,6 +9,7 @@ extension AppDelegate {
         var detail = device?.name ?? "连接输出设备后自动核对"
         var volume = device.flatMap { $0.controllable && $0.volume.isFinite ? "\(Int(max(0, min(1, $0.volume)) * 100))%" : nil }
         if case .fault(let message) = displayState { detail = message; volume = nil }
+        if case .retrying = displayState { detail = "等待系统音频资源释放"; volume = nil }
         header.view = UI.menuHeader(headline: GuardPresentation.headline(displayState, now: ProcessInfo.processInfo.systemUptime), detail: detail, volume: volume)
         menu.addItem(header); menu.addItem(.separator())
         item("自动保护", #selector(toggleEnabled), in: menu).state = controller.preferences.enabled ? .on : .off
@@ -25,7 +26,8 @@ extension AppDelegate {
         item("静音流也计时", #selector(toggleSignalFromMenu), in: menu).state = controller.preferences.detectSilentStream ? .on : .off
         item("播放时提示恢复", #selector(toggleRecoveryFromMenu), in: menu).state = controller.preferences.recoveryPromptEnabled ? .on : .off
         item("保护设备…", #selector(showDeviceSettings), in: menu)
-        item("重新核对", #selector(retry), in: menu)
+        let retry = item("重新核对", #selector(retry), in: menu)
+        retry.isEnabled = displayState != .retrying
         menu.addItem(.separator())
         item("设置…", #selector(showSettings), in: menu, key: ",")
         item("关于声音守卫…", #selector(showAbout), in: menu)

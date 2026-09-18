@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         switch controller.state {
         case .paused: return "保护已暂停"
         case .sleeping: return "睡眠中"
+        case .retrying: return "正在释放并重建系统音频检测"
         case .unavailable: return "没有可用输出设备"
         case .excluded: return "当前设备未启用保护"
         case .unsupported: return "当前设备不支持软件音量控制"

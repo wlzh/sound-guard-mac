@@ -39,6 +39,7 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(GuardPresentation.headline(.playing, now: 0), "正在播放，保持音量")
         XCTAssertEqual(GuardPresentation.headline(.waiting(301), now: 0), "空闲中，约 6 分钟后归零")
         XCTAssertEqual(GuardPresentation.headline(.waiting(0), now: 1), "空闲中，约 1 分钟后归零")
+        XCTAssertEqual(GuardPresentation.headline(.retrying, now: 0), "正在重新核对")
         XCTAssertEqual(GuardPresentation.headline(.fault("internal details"), now: 0), "保护需要检查")
     }
     func testDefaultSettings() {
@@ -289,7 +290,30 @@ final class ControllerTests: XCTestCase {
         controller.start(); audio.failWrite = true; time = 300; scheduler.action?()
         XCTAssertEqual(controller.state, .fault("write")); XCTAssertNil(scheduler.action); XCTAssertNil(audio.monitored)
         audio.onChange?(); XCTAssertEqual(audio.writes, 0); XCTAssertNil(audio.monitored)
-        audio.failWrite = false; controller.retry(); XCTAssertEqual(scheduler.deadline, 600)
+        audio.failWrite = false; controller.retry()
+        XCTAssertEqual(controller.state, .retrying); XCTAssertEqual(scheduler.deadline, 303)
+        XCTAssertEqual(audio.starts, 1); time = 303; scheduler.action?()
+        XCTAssertEqual(audio.starts, 2); XCTAssertEqual(scheduler.deadline, 603)
+    }
+    func testRetryCooldownIgnoresCallbacksAndDuplicateRequests() {
+        controller.start(); controller.retry()
+        let retryAction = scheduler.action
+        XCTAssertEqual(controller.state, .retrying); XCTAssertEqual(scheduler.deadline, 3)
+        XCTAssertNil(audio.monitored); XCTAssertEqual(audio.starts, 1); XCTAssertEqual(audio.stops, 1)
+        audio.onChange?(); controller.configure(.init()); controller.retry()
+        XCTAssertEqual(controller.state, .retrying); XCTAssertEqual(scheduler.deadline, 3)
+        XCTAssertEqual(audio.starts, 1); XCTAssertEqual(audio.stops, 1)
+        time = 3; retryAction?()
+        XCTAssertEqual(audio.starts, 2); XCTAssertNotNil(audio.monitored); XCTAssertEqual(scheduler.deadline, 303)
+    }
+    func testStopOrSleepInvalidatesPendingRetry() {
+        controller.start(); controller.retry(); let stoppedAction = scheduler.action
+        controller.stop(); time = 3; stoppedAction?(); XCTAssertEqual(audio.starts, 1)
+        controller.start(); controller.retry(); let sleepingAction = scheduler.action
+        controller.setSleeping(true); time = 6; sleepingAction?()
+        XCTAssertEqual(controller.state, .sleeping); XCTAssertEqual(audio.starts, 2)
+        controller.setSleeping(false)
+        XCTAssertEqual(audio.starts, 3); XCTAssertEqual(scheduler.deadline, 306)
     }
     func testReadFailureDoesNotMute() {
         controller.start(); audio.failRead = true; time = 300; scheduler.action?()
@@ -565,6 +589,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("wake grace", controllerTests.testWakeRestartsGrace), ("setting grace", controllerTests.testPreferenceChangeRestartsGrace),
         ("pause resume", controllerTests.testPauseAndResume), ("signal switch", controllerTests.testSignalSwitchPassedToAdapter),
         ("write failure latch", controllerTests.testWriteFailureLatchesWithoutRetryLoop), ("read failure", controllerTests.testReadFailureDoesNotMute),
+        ("retry cooldown", controllerTests.testRetryCooldownIgnoresCallbacksAndDuplicateRequests),
+        ("retry cancellation", controllerTests.testStopOrSleepInvalidatesPendingRetry),
         ("listener failure", controllerTests.testListenerFailureDoesNotMute), ("start failure", controllerTests.testStartFailureVisible),
         ("manual zero", controllerTests.testManualZeroAllowedDuringPlayback), ("manual excluded", controllerTests.testManualZeroRejectsExcluded),
         ("never restore", controllerTests.testRestorePlaybackNeverWritesNonzero), ("external selection", controllerTests.testSelectedExternalGetsProtectionAndUnselectStops),

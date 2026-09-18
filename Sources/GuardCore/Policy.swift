@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.3.4"
-    public static let build = "9"
+    public static let current = "0.3.5"
+    public static let build = "10"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -90,7 +90,7 @@ public struct RecoveryPrompt: Equatable {
     }
 }
 public enum GuardState: Equatable {
-    case paused, sleeping, unavailable, excluded, unsupported, zero, muted, playing, waiting(TimeInterval), fault(String)
+    case paused, sleeping, retrying, unavailable, excluded, unsupported, zero, muted, playing, waiting(TimeInterval), fault(String)
 }
 
 /// Pure policy. Time is monotonic, and every invalidation discards the previous deadline.

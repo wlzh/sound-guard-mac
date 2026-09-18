@@ -36,8 +36,10 @@ public final class GuardController {
     private let now: () -> TimeInterval
     private var sleeping = false
     private var running = false
+    private var retryPending = false
     private var generation = 0
     private var writeFault: String?
+    private static let retryCooldown: TimeInterval = 3
     private struct RecoveryContext {
         let id: UUID
         let zeroDevice: OutputDevice
@@ -57,7 +59,7 @@ public final class GuardController {
         do { try audio.start(); refresh() } catch { fail(error) }
     }
     public func stop() {
-        running = false; invalidate(); audio.onChange = nil; audio.stop(); monitorActive = false
+        running = false; retryPending = false; invalidate(); audio.onChange = nil; audio.stop(); monitorActive = false
         recoveryMonitoringActive = false; recovery = nil
     }
     public func configure(_ value: Preferences) {
@@ -71,14 +73,22 @@ public final class GuardController {
     }
     public func setSleeping(_ value: Bool) {
         sleeping = value; policy.reset()
-        if !value { retry() } else { refresh() }
+        if value {
+            if retryPending {
+                retryPending = false; invalidate(); state = .sleeping; onUpdate?()
+            } else {
+                refresh()
+            }
+        } else {
+            restartAudio(after: 0)
+        }
     }
     public func retry() {
-        writeFault = nil; policy.reset(); audio.stop(); monitorActive = false
-        do { try audio.start(); refresh() } catch { fail(error) }
+        guard running, !retryPending else { return }
+        restartAudio(after: Self.retryCooldown)
     }
     public func refresh() {
-        guard running else { return }
+        guard running, !retryPending else { return }
         invalidate()
         do {
             device = try audio.currentDevice()
@@ -215,7 +225,23 @@ public final class GuardController {
         policy.reset(); refresh()
     }
     private func invalidate() { generation += 1; scheduler.cancel() }
+    private func restartAudio(after delay: TimeInterval) {
+        writeFault = nil; policy.reset(); invalidate(); audio.stop(); monitorActive = false
+        recoveryMonitoringActive = false; recovery = nil
+        guard delay > 0 else {
+            do { try audio.start(); refresh() } catch { fail(error) }
+            return
+        }
+        retryPending = true; state = .retrying; onUpdate?()
+        let token = generation
+        scheduler.schedule(at: now() + delay) { [weak self] in
+            guard let self, self.running, self.retryPending, self.generation == token else { return }
+            self.retryPending = false
+            do { try self.audio.start(); self.refresh() } catch { self.fail(error) }
+        }
+    }
     private func fail(_ error: Error) {
+        retryPending = false
         writeFault = error.localizedDescription
         invalidate(); policy.reset(); state = .fault(error.localizedDescription)
         try? audio.setMonitoring(device: nil, signal: false); monitorActive = false
