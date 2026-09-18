@@ -28,6 +28,7 @@ public final class GuardController {
     public private(set) var lastAction = "尚未自动归零"
     public private(set) var monitorActive = false
     public private(set) var recoveryMonitoringActive = false
+    public private(set) var recoveryEndReason: String?
     public var recoveryPromptID: UUID? { recovery?.id }
     public var recoveryConfirmationActive: Bool { recovery?.candidateSince != nil }
     public private(set) var policy = IdlePolicy()
@@ -67,7 +68,10 @@ public final class GuardController {
         let confirmationChanged = value.recoveryPlaybackConfirmationMilliseconds != preferences.recoveryPlaybackConfirmationMilliseconds
         preferences = value; writeFault = nil; policy.reset()
         if !value.enabled || !value.recoveryPromptEnabled || detectionModeChanged ||
-           recovery.map({ !value.includes($0.zeroDevice) }) == true { recovery = nil }
+           recovery.map({ !value.includes($0.zeroDevice) }) == true {
+            if recovery != nil { recoveryEndReason = "保护或恢复设置已变更" }
+            recovery = nil
+        }
         else if confirmationChanged { recovery?.candidateSince = nil }
         refresh()
     }
@@ -98,11 +102,16 @@ public final class GuardController {
             } == true
             if let saved = recovery {
                 if !preferences.enabled || !preferences.recoveryPromptEnabled || sleeping {
+                    recoveryEndReason = "保护已关闭或系统进入睡眠"
                     recovery = nil
                 } else if let current = device {
                     if current.id != saved.zeroDevice.id || current.selectionID != saved.zeroDevice.selectionID ||
-                       current.volume != 0 || current.muted != saved.zeroDevice.muted { recovery = nil }
+                       current.volume != 0 || current.muted != saved.zeroDevice.muted {
+                        recoveryEndReason = "输出设备、路由、音量或静音状态已变化"
+                        recovery = nil
+                    }
                 } else {
+                    recoveryEndReason = "输出设备已断开"
                     recovery = nil
                 }
             }
@@ -111,6 +120,7 @@ public final class GuardController {
                 try audio.setMonitoring(device: active || recovering ? device : nil,
                                         signal: (active || recovering) && preferences.detectSilentStream)
             } catch where recovering {
+                recoveryEndReason = "恢复检测启动失败：" + error.localizedDescription
                 recovery = nil
                 try? audio.setMonitoring(device: nil, signal: false)
             }
@@ -131,12 +141,14 @@ public final class GuardController {
                    zeroDevice.id == device.id, zeroDevice.selectionID == device.selectionID,
                    zeroDevice.volume == 0, !zeroDevice.muted {
                     recovery = RecoveryContext(id: UUID(), zeroDevice: zeroDevice, originalVolume: previousVolume)
+                    recoveryEndReason = nil
                     do {
                         // Strict mode must keep the existing tap so a persistent silent stream is
                         // distinguished from new audible samples after automatic zeroing.
                         try audio.setMonitoring(device: zeroDevice, signal: preferences.detectSilentStream)
                         recoveryMonitoringActive = true
                     } catch {
+                        recoveryEndReason = "恢复检测启动失败：" + error.localizedDescription
                         recovery = nil; recoveryMonitoringActive = false
                         try? audio.setMonitoring(device: nil, signal: false)
                     }
@@ -149,12 +161,14 @@ public final class GuardController {
                 let processes = (try? audio.playingProcesses(for: current)) ?? []
                 let playing: Bool
                 if preferences.detectSilentStream {
-                    guard let strictPlayback = try? audio.playback(for: current, signal: true) else {
+                    do {
+                        playing = try audio.playback(for: current, signal: true) == .playing
+                    } catch {
+                        recoveryEndReason = "恢复信号检测失败：" + error.localizedDescription
                         recovery = nil; recoveryMonitoringActive = false
                         try? audio.setMonitoring(device: nil, signal: false)
                         onUpdate?(); return
                     }
-                    playing = strictPlayback == .playing
                 } else {
                     playing = !processes.isEmpty
                 }
@@ -214,12 +228,14 @@ public final class GuardController {
               current.muted == saved.zeroDevice.muted else { recovery = nil; throw GuardError("设备或音量已变化，未恢复音量") }
         try audio.restore(current, snapshot: saved.originalVolume)
         recovery = nil; recoveryMonitoringActive = false
+        recoveryEndReason = "已确认恢复音量"
         lastAction = "已确认恢复音量"
         policy.reset(); refresh()
     }
     public func keepSilent(for promptID: UUID) {
         guard running, let saved = recovery, saved.id == promptID else { return }
         recovery = nil; recoveryMonitoringActive = false
+        recoveryEndReason = "已确认保持静音"
         try? audio.setMonitoring(device: nil, signal: false)
         lastAction = "已确认保持静音"
         policy.reset(); refresh()

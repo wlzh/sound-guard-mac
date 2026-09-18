@@ -1,4 +1,5 @@
 import Foundation
+import CoreAudio
 import GuardCore
 import GuardPlatform
 import SignalMeter
@@ -441,6 +442,7 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .zero); XCTAssertEqual(audio.device?.volume, 0)
         XCTAssertNil(controller.recoveryPromptID); XCTAssertFalse(controller.recoveryMonitoringActive)
         XCTAssertNil(audio.monitored)
+        XCTAssertEqual(controller.recoveryEndReason, "恢复信号检测失败：playback")
     }
     func testChangingRecoveryDetectionModeInvalidatesContext() {
         var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true; controller.configure(p)
@@ -450,6 +452,7 @@ final class ControllerTests: XCTestCase {
         p.detectSilentStream = false; controller.configure(p)
         XCTAssertNil(controller.recoveryPromptID); XCTAssertFalse(controller.recoveryMonitoringActive)
         XCTAssertNil(audio.monitored); XCTAssertEqual(prompts, 0)
+        XCTAssertEqual(controller.recoveryEndReason, "保护或恢复设置已变更")
     }
     func testExcludingRecoveryDeviceInvalidatesContext() {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
@@ -495,6 +498,15 @@ final class ControllerTests: XCTestCase {
 }
 
 final class MeterTests: XCTestCase {
+    func testAggregateStartsWithoutWaitingForPlayback() {
+        let id = UUID()
+        let properties = TapConfiguration.aggregateProperties(tapUUID: id)
+        XCTAssertEqual(properties[kAudioAggregateDeviceTapAutoStartKey] as? Bool, false)
+        XCTAssertEqual(properties[kAudioAggregateDeviceIsPrivateKey] as? Bool, true)
+        let taps = properties[kAudioAggregateDeviceTapListKey] as? [[String: Any]]
+        XCTAssertEqual(taps?.count, 1)
+        XCTAssertEqual(taps?.first?[kAudioSubTapUIDKey] as? String, id.uuidString)
+    }
     func testTapConfigurationDoesNotMuteOrCaptureMicrophone() {
         let description = TapConfiguration.description(deviceUID: "synthetic-output-uid")
         XCTAssertEqual(description.deviceUID, "synthetic-output-uid")
@@ -611,7 +623,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("recovery listener isolation", controllerTests.testRecoveryListenerFailureDoesNotInvalidateSuccessfulZero),
         ("recovery lifecycle invalidation", controllerTests.testSleepOrMissingDeviceInvalidatesRecovery)
     ]),
-    (meterTests, [("tap configuration", meterTests.testTapConfigurationDoesNotMuteOrCaptureMicrophone),
+    (meterTests, [("aggregate immediate start", meterTests.testAggregateStartsWithoutWaitingForPlayback),
+                  ("tap configuration", meterTests.testTapConfigurationDoesNotMuteOrCaptureMicrophone),
                   ("signal startup", meterTests.testSignalStartupGrace), ("signal absent", meterTests.testSignalMissingCallbacksFail),
                   ("signal stale", meterTests.testSignalStaleCallbacksFail), ("signal silence", meterTests.testSignalDigitalSilenceTransitions),
                   ("signal delayed poll", meterTests.testSignalShortSoundRetainedAcrossDelayedPoll), ("signal corrupt", meterTests.testSignalInvalidClockAndSamplesFail),

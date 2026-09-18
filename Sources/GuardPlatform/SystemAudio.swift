@@ -15,6 +15,7 @@ public final class SystemAudio: AudioService {
     public var listenerCount: Int { baseline.count + outputListeners.count + processListeners.count }
     public var playbackListenerCount: Int { processListeners.count }
     public var signalActive: Bool { tap != nil }
+    public var signalHasFreshSamples: Bool { tap?.hasFreshSamples ?? false }
     public init() {}
     private func changed() {
         guard active, !pending else { return }

@@ -1,12 +1,16 @@
 # 测试状态与发布门禁
 
-版本：0.3.5，build 10。2026-09-18 自动化更新；历史硬件证据来自 macOS 15.6 / Apple Silicon。开发预览，不是全部实机验收通过。
+版本：0.3.6，build 11。2026-09-18 自动化更新；历史硬件证据来自 macOS 15.6 / Apple Silicon。开发预览，不是全部实机验收通过。
 
 ## 当前可运行检查
 
-`zsh scripts/test-all.sh` 统一运行独立 GuardTests、App debug 编译、原生 UI 检查、文档/版本/链接检查及 diff 检查。当前 72 项回归、261 次断言、0 失败：22 项策略/设置迁移/展示测试、38 项注入控制器测试、7 项信号健康测试、4 项 C 信号摘要测试、1 项无硬件访问的 Tap 配置测试。另有 50 次 UI precondition。名称类似 XCTest 的轻量断言为项目自带实现，不依赖 XCTest 框架。
+`zsh scripts/test-all.sh` 统一运行独立 GuardTests、App debug 编译、原生 UI 检查、文档/版本/链接检查及 diff 检查。当前 73 项回归、267 次断言：22 项策略/设置迁移/展示测试、38 项注入控制器测试、7 项信号健康测试、4 项 C 信号摘要测试、2 项无硬件访问的 Tap/聚合配置测试。另有 50 次 UI precondition。名称类似 XCTest 的轻量断言为项目自带实现，不依赖 XCTest 框架。
 
-v0.3.5 release Universal 构建（arm64/x86_64）、Info.plist、路径隐私门禁、ad-hoc strict 验签和 ZIP 完整性已通过。`SoundGuard-v0.3.5-macos-universal.zip` 的 SHA256 为 `a6d1028f909c1ce171115bc2930c8f2ed37edf4e328fe7b9f731149020f15b96`。安装前 v0.3.4 只读状态确认处于无有效回调的锁存故障，监听与 Signal Tap 均已释放；退出后等待 3 秒，替换 `/Applications/Sound Guard.app` 并启动。最终只读状态返回 v0.3.5、`monitorActive=true`、`signalActive=true`、状态为播放中，安装前后音量均约 18.75%，未执行音量写入。桌面 UI 控制接口未能连接仅菜单栏 App，因此真实点击“重新核对”仍标 NOT RUN；CI 和远端附件仍待发布后记录。
+更正 v0.3.5 验收：安装后首次 `playing` / `signalActive=true` 只是对象存在和启动宽限，随后真实重新核对仍进入无回调故障，不能作为恢复成功证据。3 秒冷却未解决问题，旧“Core Audio 资源竞争”推断撤回。v0.3.6 修正聚合设备等待播放源的配置，并新增新鲜有效样本标记，不能再只凭启动快照通过验收。
+
+2026-09-18 本机实测：修正配置的验证包于 22:37 进入严格空闲计时，22:38 自动从约 18.75% 归零。该轮之后恢复监听已退出，旧版未保存原因，无法追溯具体触发因素。增加诊断后的 v0.3.6 / build 11 已安装；用户暂停后状态为 `waiting`、`signalHasFreshSamples=true`，22:43 自动归零，之后捕获 `recoveryConfirmationActive=true`，随后记录 `已确认恢复音量`，音量回到原值约 16.8%，状态 `playing` 且有效样本为 true。确认恢复由用户操作，自动化未调高音量。一次完整链路通过不等于所有生命周期均通过。
+
+三轮 `--probe-signal-retry` 因启动时音量已非零而安全中止，尚未通过；未为测试擅自归零。该探针须退出 App、由用户将音量设为 0、已主动开启严格检测后执行；它不写音量、不改变偏好。菜单重复点击、权限撤销、全部外部设备及长期性能仍待验收。
 
 实现提交 `67759f0` 的 GitHub Actions `macOS checks` 已通过：[run 34813228518](https://github.com/wlzh/sound-guard-mac/actions/runs/34813228518)。本地发布包 `SoundGuard-v0.3.0-macos-universal.zip` 的 SHA256 为 `9ff7a145f2f5706648a7e30927a2648272b502f0fbab60c06eab6ae493e9b465`；发布后还须从 GitHub Release 下载并复核远端附件。
 
@@ -18,7 +22,7 @@ v0.3.5 release Universal 构建（arm64/x86_64）、Info.plist、路径隐私门
 | 注入集成测试 | 监听启停、有声确认截止、播放中断重置、配置重置、旧任务失效、单段去重、显式保持静音、恢复复核、重试冷却与故障隔离 | PASS，38 项；不等同 HAL 实机 |
 | C 信号摘要 | 全零、极弱非零、无效样本、缺失回调 | PASS，4 项；不等同 Tap 实机 |
 | 信号健康 | 启动宽限、失去回调、过期回调、静音转换、延迟后的短音、600 ms 防抖、无效时钟/样本 | PASS，7 项 |
-| Tap 配置 | 指定输出 UID、空排除列表、private、unmuted | 无音频访问的构造测试，1 项 |
+| Tap 配置 | 指定输出 UID、空排除列表、private、unmuted、聚合设备不等待播放源 | 无音频访问的构造测试，2 项 |
 | App/UI | 设置/关于/品牌 Alert/恢复窗口、明暗渲染、非激活面板、等宽按钮、有声确认默认值、毫秒及小数秒输入、重新核对禁用态、显式选择与关闭分流 | PASS，50 次检查；真实 AX 多屏定位 NOT RUN |
 | 内建扬声器实机 | 非零空闲 1 分钟后自动归零，写后回读、播放监听释放 | PASS；其他设备/权限矩阵 NOT RUN |
 | 性能 | 旧版零音量休眠；v0.3.0 只读恢复监听 60 秒 | 短时 PASS；完整 App、10 分钟/8 小时 NOT RUN |

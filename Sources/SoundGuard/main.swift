@@ -84,6 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "enabled": controller.preferences.enabled, "minutes": controller.preferences.minutes,
             "monitorActive": controller.monitorActive, "listeners": audio.listenerCount,
             "playbackListeners": audio.playbackListenerCount, "signalActive": audio.signalActive,
+            "signalHasFreshSamples": audio.signalHasFreshSamples,
+            "recoveryEndReason": controller.recoveryEndReason ?? "",
             "recoveryMonitoringActive": controller.recoveryMonitoringActive,
             "recoveryConfirmationActive": controller.recoveryConfirmationActive,
             "lastAction": controller.lastAction]
@@ -185,7 +187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func openRepository() { NSWorkspace.shared.open(URL(string: repository)!) }
 }
 
-if CommandLine.arguments.contains("--status") {
+if CommandLine.arguments.contains("--probe-signal-retry") {
+    exit(runSignalRetryProbe())
+} else if CommandLine.arguments.contains("--status") {
     let since = Date().timeIntervalSince1970
     DistributedNotificationCenter.default().postNotificationName(statusRequest, object: nil, userInfo: nil, deliverImmediately: true)
     var received = false

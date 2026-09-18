@@ -4,6 +4,15 @@ import GuardCore
 import SignalMeter
 
 public enum TapConfiguration {
+    public static func aggregateProperties(tapUUID: UUID) -> [String: Any] {
+        [kAudioAggregateDeviceNameKey: "Sound Guard Observer",
+         kAudioAggregateDeviceUIDKey: "uk.869hr.SoundGuard.observer." + UUID().uuidString,
+         kAudioAggregateDeviceIsPrivateKey: true,
+         // AutoStart waits for a writer, which prevents observing an idle output.
+         kAudioAggregateDeviceTapAutoStartKey: false,
+         kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: tapUUID.uuidString,
+                                          kAudioSubTapDriftCompensationKey: true]]]
+    }
     public static func description(deviceUID: String) -> CATapDescription {
         // The processes initializer is available in older SDKs; exclusive=true means exclude this (empty) list.
         let description = CATapDescription(processes: [], deviceUID: deviceUID, stream: 0)
@@ -23,6 +32,11 @@ final class SignalTap {
     private var health = SignalHealth(started: 0)
     private var poll: DispatchSourceTimer?
     var aggregateID: AudioObjectID { aggregate }
+    var hasFreshSamples: Bool {
+        guard let meter else { return false }
+        let buffer = sg_last_buffer(meter), now = sg_now()
+        return buffer > 0 && now >= buffer && now - buffer < 2_000_000_000 && sg_invalid(meter) == 0
+    }
     init(device: OutputDevice, changed: @escaping () -> Void) throws {
         guard let allocated = sg_create() else { throw GuardError("无法分配信号检测器") }
         meter = allocated
@@ -36,15 +50,7 @@ final class SignalTap {
                   format.mFormatFlags & kAudioFormatFlagIsFloat != 0,
                   format.mFormatFlags & kAudioFormatFlagIsBigEndian == 0,
                   format.mBitsPerChannel == 32 else { throw GuardError("静音流检测只支持本机 Float32 PCM") }
-            let uid = UUID().uuidString
-            let properties: [String: Any] = [
-                kAudioAggregateDeviceNameKey: "Sound Guard Observer",
-                kAudioAggregateDeviceUIDKey: "uk.869hr.SoundGuard.observer." + uid,
-                kAudioAggregateDeviceIsPrivateKey: true,
-                kAudioAggregateDeviceTapAutoStartKey: true,
-                kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: description.uuid.uuidString,
-                                                  kAudioSubTapDriftCompensationKey: true]]
-            ]
+            let properties = TapConfiguration.aggregateProperties(tapUUID: description.uuid)
             try check(AudioHardwareCreateAggregateDevice(properties as CFDictionary, &aggregate), "建立私有音频观察设备")
             try check(AudioDeviceCreateIOProcIDWithBlock(&io, aggregate, nil) { _, input, _, _, _ in
                 let timestamp = sg_now()
