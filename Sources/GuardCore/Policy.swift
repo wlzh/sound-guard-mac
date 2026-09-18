@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.3.6"
-    public static let build = "11"
+    public static let current = "0.3.7"
+    public static let build = "12"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -68,7 +68,7 @@ public struct OutputDevice: Equatable {
     }
 }
 
-public enum Playback: Equatable { case idle, playing, unknown }
+public enum Playback: Equatable { case idle, playing, starting, unknown }
 public struct PlaybackProcess: Equatable {
     public let pid: Int32
     public init(pid: Int32) { self.pid = pid }
@@ -90,7 +90,7 @@ public struct RecoveryPrompt: Equatable {
     }
 }
 public enum GuardState: Equatable {
-    case paused, sleeping, retrying, unavailable, excluded, unsupported, zero, muted, playing, waiting(TimeInterval), fault(String)
+    case paused, sleeping, retrying, checkingSignal, unavailable, excluded, unsupported, zero, muted, playing, waiting(TimeInterval), fault(String)
 }
 
 /// Pure policy. Time is monotonic, and every invalidation discards the previous deadline.
@@ -112,6 +112,7 @@ public struct IdlePolicy {
         guard device.volume > 0 else { return stop(.zero) }
         guard !device.muted else { return stop(.muted) }
         guard playback != .unknown else { return stop(.fault("播放状态未知")) }
+        guard playback != .starting else { return stop(.checkingSignal) }
         let key = "\(device.id)|\(device.selectionID)"
         if identity != key || volume != device.volume { deadline = nil }
         identity = key; volume = device.volume

@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "playbackListeners": audio.playbackListenerCount, "signalActive": audio.signalActive,
             "signalHasFreshSamples": audio.signalHasFreshSamples,
             "recoveryEndReason": controller.recoveryEndReason ?? "",
+            "recoveryContextRetained": controller.recoveryContextRetained,
             "recoveryMonitoringActive": controller.recoveryMonitoringActive,
             "recoveryConfirmationActive": controller.recoveryConfirmationActive,
             "lastAction": controller.lastAction]
@@ -106,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .paused: return "保护已暂停"
         case .sleeping: return "睡眠中"
         case .retrying: return "正在释放并重建系统音频检测"
+        case .checkingSignal: return "正在等待有效音频样本，尚未开始计时"
         case .unavailable: return "没有可用输出设备"
         case .excluded: return "当前设备未启用保护"
         case .unsupported: return "当前设备不支持软件音量控制"

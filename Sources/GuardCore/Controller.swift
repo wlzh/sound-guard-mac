@@ -29,7 +29,8 @@ public final class GuardController {
     public private(set) var monitorActive = false
     public private(set) var recoveryMonitoringActive = false
     public private(set) var recoveryEndReason: String?
-    public var recoveryPromptID: UUID? { recovery?.id }
+    public var recoveryPromptID: UUID? { retryPending ? nil : recovery?.id }
+    public var recoveryContextRetained: Bool { recovery != nil }
     public var recoveryConfirmationActive: Bool { recovery?.candidateSince != nil }
     public private(set) var policy = IdlePolicy()
     private let audio: AudioService
@@ -79,6 +80,7 @@ public final class GuardController {
         sleeping = value; policy.reset()
         if value {
             if retryPending {
+                recovery = nil; recoveryEndReason = "系统进入睡眠"
                 retryPending = false; invalidate(); state = .sleeping; onUpdate?()
             } else {
                 refresh()
@@ -88,8 +90,8 @@ public final class GuardController {
         }
     }
     public func retry() {
-        guard running, !retryPending else { return }
-        restartAudio(after: Self.retryCooldown)
+        guard running, !sleeping, !retryPending else { return }
+        restartAudio(after: Self.retryCooldown, preservingRecovery: true)
     }
     public func refresh() {
         guard running, !retryPending else { return }
@@ -106,7 +108,8 @@ public final class GuardController {
                     recovery = nil
                 } else if let current = device {
                     if current.id != saved.zeroDevice.id || current.selectionID != saved.zeroDevice.selectionID ||
-                       current.volume != 0 || current.muted != saved.zeroDevice.muted {
+                       current.volume != 0 || current.muted != saved.zeroDevice.muted ||
+                       !current.controllable || !preferences.includes(current) {
                         recoveryEndReason = "输出设备、路由、音量或静音状态已变化"
                         recovery = nil
                     }
@@ -162,7 +165,13 @@ public final class GuardController {
                 let playing: Bool
                 if preferences.detectSilentStream {
                     do {
-                        playing = try audio.playback(for: current, signal: true) == .playing
+                        let signal = try audio.playback(for: current, signal: true)
+                        if signal == .starting {
+                            recovery?.candidateSince = nil
+                            onUpdate?(); return
+                        }
+                        guard signal != .unknown else { throw GuardError("恢复播放状态未知") }
+                        playing = signal == .playing
                     } catch {
                         recoveryEndReason = "恢复信号检测失败：" + error.localizedDescription
                         recovery = nil; recoveryMonitoringActive = false
@@ -220,7 +229,7 @@ public final class GuardController {
         } catch { writeFault = error.localizedDescription; fail(error) }
     }
     public func restoreVolume(for promptID: UUID) throws {
-        guard running, !sleeping, preferences.enabled, preferences.recoveryPromptEnabled,
+        guard running, !sleeping, !retryPending, preferences.enabled, preferences.recoveryPromptEnabled,
               let saved = recovery, saved.id == promptID else { throw GuardError("恢复请求已失效") }
         let current = try audio.currentDevice()
         guard let current, current.id == saved.zeroDevice.id,
@@ -241,14 +250,18 @@ public final class GuardController {
         policy.reset(); refresh()
     }
     private func invalidate() { generation += 1; scheduler.cancel() }
-    private func restartAudio(after delay: TimeInterval) {
+    private func restartAudio(after delay: TimeInterval, preservingRecovery: Bool = false) {
+        guard running else { return }
+        retryPending = delay > 0
         writeFault = nil; policy.reset(); invalidate(); audio.stop(); monitorActive = false
-        recoveryMonitoringActive = false; recovery = nil
+        recoveryMonitoringActive = false
+        if preservingRecovery { recovery?.candidateSince = nil }
+        else { recovery = nil }
         guard delay > 0 else {
             do { try audio.start(); refresh() } catch { fail(error) }
             return
         }
-        retryPending = true; state = .retrying; onUpdate?()
+        state = .retrying; onUpdate?()
         let token = generation
         scheduler.schedule(at: now() + delay) { [weak self] in
             guard let self, self.running, self.retryPending, self.generation == token else { return }
@@ -257,6 +270,7 @@ public final class GuardController {
         }
     }
     private func fail(_ error: Error) {
+        if recovery != nil { recoveryEndReason = "检测重建或读取失败：" + error.localizedDescription }
         retryPending = false
         writeFault = error.localizedDescription
         invalidate(); policy.reset(); state = .fault(error.localizedDescription)

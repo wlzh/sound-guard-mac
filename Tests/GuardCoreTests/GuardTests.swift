@@ -41,6 +41,7 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(GuardPresentation.headline(.waiting(301), now: 0), "空闲中，约 6 分钟后归零")
         XCTAssertEqual(GuardPresentation.headline(.waiting(0), now: 1), "空闲中，约 1 分钟后归零")
         XCTAssertEqual(GuardPresentation.headline(.retrying, now: 0), "正在重新核对")
+        XCTAssertEqual(GuardPresentation.headline(.checkingSignal, now: 0), "正在等待音频样本")
         XCTAssertEqual(GuardPresentation.headline(.fault("internal details"), now: 0), "保护需要检查")
     }
     func testDefaultSettings() {
@@ -156,7 +157,8 @@ final class PolicyTests: XCTestCase {
             (nil, .idle, .init(), false, .unavailable), (speaker(builtIn: false), .idle, .init(), false, .excluded),
             (speaker(controllable: false), .idle, .init(), false, .unsupported),
             (speaker(muted: true), .idle, .init(), false, .muted),
-            (speaker(), .unknown, .init(), false, .fault("播放状态未知"))]
+            (speaker(), .unknown, .init(), false, .fault("播放状态未知")),
+            (speaker(), .starting, .init(), false, .checkingSignal)]
         for (device, playback, preferences, sleeping, state) in scenarios {
             var policy = IdlePolicy()
             _ = policy.evaluate(device: speaker(), playback: .idle, preferences: .init(), sleeping: false, now: 0)
@@ -234,6 +236,150 @@ final class ControllerTests: XCTestCase {
             XCTAssertTrue(false); return
         }
         time = deadline; action()
+    }
+    private func armRecovery(strict: Bool = false) {
+        var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = strict
+        controller.configure(p); controller.start(); time = 300; scheduler.action?()
+        XCTAssertTrue(controller.recoveryContextRetained)
+    }
+    func testRetryRetainsRecoveryAndOriginalVolume() throws {
+        armRecovery()
+        let id = controller.recoveryPromptID!
+        var prompts: [RecoveryPrompt] = []; controller.onRecoveryPrompt = { prompts.append($0) }
+        controller.retry()
+        XCTAssertTrue(controller.recoveryContextRetained); XCTAssertNil(controller.recoveryPromptID)
+        XCTAssertFalse(controller.recoveryMonitoringActive); XCTAssertNil(audio.monitored)
+        do { try controller.restoreVolume(for: id); XCTAssertTrue(false) }
+        catch { XCTAssertEqual(audio.restoreWrites, 0) }
+        time = 303; scheduler.action?()
+        XCTAssertEqual(controller.recoveryPromptID, id); XCTAssertTrue(controller.recoveryMonitoringActive)
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?(); completeRecoveryConfirmation()
+        XCTAssertEqual(prompts.count, 1); XCTAssertEqual(prompts.first?.volume, 0.4)
+        try controller.restoreVolume(for: id)
+        XCTAssertEqual(audio.restoreWrites, 1); XCTAssertEqual(audio.device?.volume, 0.4)
+    }
+    func testStrictRetryDoesNotTreatStartupAsPlayback() {
+        armRecovery(strict: true)
+        var prompts = 0; controller.onRecoveryPrompt = { _ in prompts += 1 }
+        controller.retry(); audio.activity = .starting; time = 303; scheduler.action?()
+        XCTAssertTrue(controller.recoveryMonitoringActive); XCTAssertFalse(controller.recoveryConfirmationActive)
+        XCTAssertNil(scheduler.deadline); XCTAssertEqual(prompts, 0)
+        audio.activity = .idle; time = 304; audio.onChange?()
+        XCTAssertEqual(prompts, 0); XCTAssertFalse(controller.recoveryConfirmationActive)
+        audio.activity = .playing; time = 305; audio.onChange?()
+        XCTAssertEqual(scheduler.deadline, 307); completeRecoveryConfirmation()
+        XCTAssertEqual(prompts, 1); XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRetryResetsCandidateAndInvalidatesOldDeadline() {
+        armRecovery()
+        var prompts = 0; controller.onRecoveryPrompt = { _ in prompts += 1 }
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        let old = scheduler.action
+        time = 301; controller.retry(); XCTAssertFalse(controller.recoveryConfirmationActive)
+        time = 302; old?(); XCTAssertEqual(prompts, 0)
+        time = 304; scheduler.action?(); XCTAssertEqual(scheduler.deadline, 306)
+        completeRecoveryConfirmation(); XCTAssertEqual(prompts, 1)
+    }
+    func testRetryDoesNotRepeatAlreadyPromptedPlayback() {
+        armRecovery(strict: true)
+        var prompts = 0; controller.onRecoveryPrompt = { _ in prompts += 1 }
+        audio.activity = .playing; audio.onChange?(); completeRecoveryConfirmation()
+        XCTAssertEqual(prompts, 1)
+        controller.retry(); audio.activity = .starting; time = 305; scheduler.action?()
+        audio.activity = .playing; time = 306; audio.onChange?()
+        XCTAssertEqual(prompts, 1); XCTAssertNil(scheduler.deadline)
+        audio.activity = .idle; audio.onChange?()
+        audio.activity = .playing; audio.onChange?(); completeRecoveryConfirmation()
+        XCTAssertEqual(prompts, 2)
+    }
+    func testRetryCannotResurrectConsumedOrManualZero() {
+        armRecovery(); controller.keepSilent(for: controller.recoveryPromptID!)
+        controller.retry(); time = 303; scheduler.action?()
+        XCTAssertFalse(controller.recoveryContextRetained); XCTAssertNil(audio.monitored)
+        audio.device = speaker(); audio.onChange?(); controller.zeroNow()
+        controller.retry(); time = 306; scheduler.action?()
+        XCTAssertFalse(controller.recoveryContextRetained); XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRetryRevalidatesDeviceAndVolume() {
+        armRecovery(); controller.retry(); audio.device = speaker(0, id: 2)
+        time = 303; scheduler.action?()
+        XCTAssertFalse(controller.recoveryContextRetained); XCTAssertNil(audio.monitored)
+        XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRetryRejectsChangedNonzeroVolume() {
+        armRecovery(); controller.retry(); audio.device = speaker(0.2)
+        time = 303; scheduler.action?()
+        XCTAssertFalse(controller.recoveryContextRetained); XCTAssertTrue(controller.monitorActive)
+        XCTAssertEqual(scheduler.deadline, 603); XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRetrySettingsChangeConsumesContext() {
+        armRecovery(strict: true); controller.retry()
+        var p = controller.preferences; p.detectSilentStream = false; controller.configure(p)
+        XCTAssertFalse(controller.recoveryContextRetained)
+        time = 303; scheduler.action?()
+        XCTAssertNil(audio.monitored); XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRetrySleepAndStopDiscardRetainedContext() {
+        armRecovery(); controller.retry(); let old = scheduler.action
+        controller.setSleeping(true); XCTAssertFalse(controller.recoveryContextRetained)
+        time = 303; old?(); XCTAssertEqual(audio.starts, 1)
+        controller.retry(); XCTAssertNil(scheduler.action)
+        controller.setSleeping(false); XCTAssertNil(audio.monitored)
+        controller.stop(); controller.setSleeping(false); XCTAssertEqual(audio.starts, 2)
+    }
+    func testRetryFailureDiscardsRetainedContext() {
+        armRecovery(); controller.retry(); audio.failStart = true
+        time = 303; scheduler.action?()
+        XCTAssertEqual(controller.state, .fault("start")); XCTAssertFalse(controller.recoveryContextRetained)
+        XCTAssertEqual(controller.recoveryEndReason, "检测重建或读取失败：start")
+        XCTAssertNil(scheduler.action); XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRetryRejectsRouteMuteMissingAndUncontrollable() {
+        for changed: OutputDevice? in [speaker(0, route: "headphone"), speaker(0, muted: true),
+                                      nil, speaker(0, controllable: false)] {
+            let service = FakeAudio(), clock = FakeScheduler()
+            var instant = 0.0, p = Preferences(); p.recoveryPromptEnabled = true
+            let subject = GuardController(audio: service, scheduler: clock, preferences: p, now: { instant })
+            subject.start(); instant = 300; clock.action?()
+            XCTAssertTrue(subject.recoveryContextRetained)
+            subject.retry(); service.device = changed; instant = 303; clock.action?()
+            XCTAssertFalse(subject.recoveryContextRetained); XCTAssertNil(service.monitored)
+            XCTAssertEqual(service.restoreWrites, 0); subject.stop()
+        }
+    }
+    func testRetryDisabledSettingsAndStopCannotResurrectRecovery() {
+        for variant in 0...3 {
+            let service = FakeAudio(), clock = FakeScheduler()
+            var instant = 0.0, p = Preferences(); p.recoveryPromptEnabled = true
+            let subject = GuardController(audio: service, scheduler: clock, preferences: p, now: { instant })
+            subject.start(); instant = 300; clock.action?(); subject.retry()
+            let stale = clock.action
+            if variant == 3 { subject.stop() }
+            else {
+                if variant == 0 { p.enabled = false }
+                if variant == 1 { p.recoveryPromptEnabled = false }
+                if variant == 2 { p.protectBuiltIn = false }
+                subject.configure(p)
+            }
+            instant = 303; stale?()
+            XCTAssertFalse(subject.recoveryContextRetained); XCTAssertNil(service.monitored)
+            XCTAssertEqual(service.restoreWrites, 0); subject.stop()
+        }
+    }
+    func testRetryRecoveryMonitorAndReadFailuresReleaseContext() {
+        for variant in 0...2 {
+            let service = FakeAudio(), clock = FakeScheduler()
+            var instant = 0.0, p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = true
+            let subject = GuardController(audio: service, scheduler: clock, preferences: p, now: { instant })
+            subject.start(); instant = 300; clock.action?(); subject.retry()
+            if variant == 0 { service.failRead = true }
+            if variant == 1 { service.failZeroMonitor = true }
+            if variant == 2 { service.failPlayback = true }
+            instant = 303; clock.action?()
+            XCTAssertFalse(subject.recoveryContextRetained); XCTAssertNil(service.monitored)
+            XCTAssertNotNil(subject.recoveryEndReason); XCTAssertEqual(service.restoreWrites, 0)
+            subject.stop()
+        }
     }
     func testAutoZeroAndRelease() {
         controller.start(); XCTAssertNotNil(audio.monitored); time = 300; scheduler.action?()
@@ -516,7 +662,7 @@ final class MeterTests: XCTestCase {
     }
     func testSignalStartupGrace() throws {
         var health = SignalHealth(started: 1)
-        XCTAssertEqual(try health.evaluate(now: 100, buffer: 0, sound: 0, invalid: false), .playing)
+        XCTAssertEqual(try health.evaluate(now: 100, buffer: 0, sound: 0, invalid: false), .starting)
     }
     func testSignalMissingCallbacksFail() {
         var health = SignalHealth(started: 1)
@@ -530,7 +676,7 @@ final class MeterTests: XCTestCase {
     }
     func testSignalDigitalSilenceTransitions() throws {
         var health = SignalHealth(started: 1)
-        XCTAssertEqual(try health.evaluate(now: 100, buffer: 50, sound: 0, invalid: false), .playing)
+        XCTAssertEqual(try health.evaluate(now: 100, buffer: 50, sound: 0, invalid: false), .idle)
         XCTAssertEqual(try health.evaluate(now: 1_000_000_000, buffer: 999_000_000, sound: 0, invalid: false), .idle)
     }
     func testSignalShortSoundRetainedAcrossDelayedPoll() throws {
@@ -594,6 +740,19 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("invalid volume", policyTests.testInvalidVolumeCannotTrigger)
     ]),
     (controllerTests, [
+        ("retry retained original volume", controllerTests.testRetryRetainsRecoveryAndOriginalVolume),
+        ("retry strict startup", controllerTests.testStrictRetryDoesNotTreatStartupAsPlayback),
+        ("retry candidate restart", controllerTests.testRetryResetsCandidateAndInvalidatesOldDeadline),
+        ("retry prompt deduplication", controllerTests.testRetryDoesNotRepeatAlreadyPromptedPlayback),
+        ("retry consumed context", controllerTests.testRetryCannotResurrectConsumedOrManualZero),
+        ("retry changed device", controllerTests.testRetryRevalidatesDeviceAndVolume),
+        ("retry changed volume", controllerTests.testRetryRejectsChangedNonzeroVolume),
+        ("retry changed settings", controllerTests.testRetrySettingsChangeConsumesContext),
+        ("retry sleep retained context", controllerTests.testRetrySleepAndStopDiscardRetainedContext),
+        ("retry retained failure", controllerTests.testRetryFailureDiscardsRetainedContext),
+        ("retry device safety matrix", controllerTests.testRetryRejectsRouteMuteMissingAndUncontrollable),
+        ("retry lifecycle safety matrix", controllerTests.testRetryDisabledSettingsAndStopCannotResurrectRecovery),
+        ("retry failure safety matrix", controllerTests.testRetryRecoveryMonitorAndReadFailuresReleaseContext),
         ("auto zero cleanup", controllerTests.testAutoZeroAndRelease), ("zero no monitor", controllerTests.testZeroDoesNotMonitor),
         ("mute no monitor", controllerTests.testMutedDoesNotMonitor), ("excluded no monitor", controllerTests.testExcludedDoesNotMonitor),
         ("stale timer playback", controllerTests.testStaleTimerIgnoredOnPlayback), ("stale timer exit", controllerTests.testStaleTimerIgnoredAfterStop),
