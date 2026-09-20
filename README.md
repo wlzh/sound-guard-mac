@@ -54,6 +54,7 @@ open "dist/Sound Guard.app"
 ## 作者与许可
 
 作者：[wlzh](https://github.com/wlzh)。网站：[869hr.uk](https://869hr.uk)。
+项目介绍：[微信公众号文章](https://mp.weixin.qq.com/s/ERxWAhD5o-oD4PLsADdTUw) / [X 帖子](https://x.com/wlzh/status/2097946111713444311?s=20)。
 分发包由 `zsh scripts/package-release.sh` 生成 Universal ZIP 和 SHA256。当前仅 ad-hoc 签名、未公证；安装和系统拦截处理见[安装指南](docs/INSTALL.md)。公开 Release 可直接下载。
 
 源码采用 [MIT License](LICENSE)。仓库公开开源。关于窗口展示版本、作者、网站及项目链接，完整协议通过独立面板查看。
