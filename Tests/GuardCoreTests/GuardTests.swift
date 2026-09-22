@@ -90,6 +90,25 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(VolumeSnapshot(values: [0, 0.4]).displayVolume, 0.4)
         XCTAssertEqual(VolumeSnapshot(values: []).displayVolume, 0)
     }
+    func testSelectedVolumePreservesBalanceAndExactOriginal() throws {
+        let original = VolumeSnapshot(values: [0, 0.12345, 0.2469])
+        XCTAssertEqual(try original.restoring(toPercent: nil), original)
+        for percent in [1, 12, 19, 100] {
+            let adjusted = try original.restoring(toPercent: percent)
+            XCTAssertEqual(adjusted.values, [0, Float(percent) / 200, Float(percent) / 100])
+        }
+        XCTAssertEqual(try VolumeSnapshot(values: [0.0001]).restoring(toPercent: 100).values, [1])
+    }
+    func testSelectedVolumeRejectsInvalidTargetsAndSnapshots() {
+        for percent in [-1, 0, 101, Int.max] {
+            do { _ = try VolumeSnapshot(values: [0.4]).restoring(toPercent: percent); XCTAssertTrue(false) }
+            catch { XCTAssertTrue(true) }
+        }
+        for values: [Float] in [[], [0], [-0.1], [1.1], [.nan], [.infinity]] {
+            do { _ = try VolumeSnapshot(values: values).restoring(toPercent: 20); XCTAssertTrue(false) }
+            catch { XCTAssertTrue(true) }
+        }
+    }
     func testCorruptPreferencesUseDefaults() { XCTAssertEqual(Preferences.decode(Data("bad".utf8)), Preferences()) }
     func testInvalidPersistedTimeoutSanitized() throws {
         var p = Preferences(); p.minutes = -5
@@ -241,6 +260,32 @@ final class ControllerTests: XCTestCase {
         var p = Preferences(); p.recoveryPromptEnabled = true; p.detectSilentStream = strict
         controller.configure(p); controller.start(); time = 300; scheduler.action?()
         XCTAssertTrue(controller.recoveryContextRetained)
+    }
+    func testRestoreSelectedVolumeAndConsumeContext() throws {
+        armRecovery()
+        let id = controller.recoveryPromptID!
+        try controller.restoreVolume(for: id, targetPercent: 12)
+        XCTAssertEqual(audio.device?.volume, 0.12); XCTAssertEqual(audio.restoreWrites, 1)
+        XCTAssertFalse(controller.recoveryContextRetained)
+        do { try controller.restoreVolume(for: id, targetPercent: 80); XCTAssertTrue(false) }
+        catch { XCTAssertEqual(audio.restoreWrites, 1) }
+    }
+    func testInvalidSelectionDoesNotWriteAndCanRetry() throws {
+        armRecovery()
+        let id = controller.recoveryPromptID!
+        do { try controller.restoreVolume(for: id, targetPercent: 0); XCTAssertTrue(false) }
+        catch { XCTAssertEqual(audio.restoreWrites, 0) }
+        XCTAssertTrue(controller.recoveryContextRetained)
+        try controller.restoreVolume(for: id, targetPercent: 100)
+        XCTAssertEqual(audio.device?.volume, 1)
+    }
+    func testSelectedRestoreRejectsExternalChange() {
+        armRecovery()
+        let id = controller.recoveryPromptID!
+        audio.device = speaker(0.3)
+        do { try controller.restoreVolume(for: id, targetPercent: 12); XCTAssertTrue(false) }
+        catch { XCTAssertEqual(audio.restoreWrites, 0) }
+        XCTAssertEqual(audio.device?.volume, 0.3)
     }
     func testRetryRetainsRecoveryAndOriginalVolume() throws {
         armRecovery()
@@ -731,6 +776,8 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("legacy preferences migration", policyTests.testLegacyPreferencesMigration), ("recovery timeout bounds", policyTests.testRecoveryTimeoutValidation),
         ("recovery confirmation bounds", policyTests.testRecoveryConfirmationValidation),
         ("volume snapshot display", policyTests.testVolumeSnapshotUsesVisibleMaximum),
+        ("selected volume balance", policyTests.testSelectedVolumePreservesBalanceAndExactOriginal),
+        ("selected volume invalid", policyTests.testSelectedVolumeRejectsInvalidTargetsAndSnapshots),
         ("invalid saved timeout", policyTests.testInvalidPersistedTimeoutSanitized), ("built-in default", policyTests.testDefaultOnlyBuiltIn),
         ("stable identity", policyTests.testDeviceIdentityNotName), ("disable built-in", policyTests.testBuiltInCanBeDisabled),
         ("exact deadline", policyTests.testInitialGraceAndExactDeadline), ("continuous playback", policyTests.testPlayingNeverHasDeadline),
@@ -740,6 +787,9 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("invalid volume", policyTests.testInvalidVolumeCannotTrigger)
     ]),
     (controllerTests, [
+        ("selected restore", controllerTests.testRestoreSelectedVolumeAndConsumeContext),
+        ("invalid selection retry", controllerTests.testInvalidSelectionDoesNotWriteAndCanRetry),
+        ("selected restore external change", controllerTests.testSelectedRestoreRejectsExternalChange),
         ("retry retained original volume", controllerTests.testRetryRetainsRecoveryAndOriginalVolume),
         ("retry strict startup", controllerTests.testStrictRetryDoesNotTreatStartupAsPlayback),
         ("retry candidate restart", controllerTests.testRetryResetsCandidateAndInvalidatesOldDeadline),

@@ -50,8 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         status.button?.setAccessibilityLabel("声音守卫：声波盾牌")
         let menu = NSMenu(); menu.delegate = self; status.menu = menu
         controller.onUpdate = { [weak self] in self?.updateStatus() }
-        recoveryPresenter.onRestore = { [weak self] prompt in
-            do { try self?.controller.restoreVolume(for: prompt.id) }
+        recoveryPresenter.onRestore = { [weak self] prompt, targetPercent in
+            do { try self?.controller.restoreVolume(for: prompt.id, targetPercent: targetPercent) }
             catch { self?.showError(error.localizedDescription) }
         }
         recoveryPresenter.onKeepSilent = { [weak self] prompt in

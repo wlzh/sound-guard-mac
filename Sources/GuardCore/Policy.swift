@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.3.7"
-    public static let build = "12"
+    public static let current = "0.3.8"
+    public static let build = "13"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -77,6 +77,14 @@ public struct VolumeSnapshot: Equatable {
     public let values: [Float]
     public var displayVolume: Float { values.max() ?? 0 }
     public init(values: [Float]) { self.values = values }
+    public func restoring(toPercent percent: Int?) throws -> VolumeSnapshot {
+        guard !values.isEmpty, values.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              displayVolume > 0 else { throw GuardError("原音量记录无效") }
+        guard let percent else { return self }
+        guard (1...100).contains(percent) else { throw GuardError("恢复音量必须为 1–100%") }
+        let target = Float(percent) / 100
+        return VolumeSnapshot(values: values.map { ($0 / displayVolume) * target })
+    }
 }
 public struct RecoveryPrompt: Equatable {
     public let id: UUID

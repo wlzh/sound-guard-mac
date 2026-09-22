@@ -106,13 +106,14 @@ func runUIChecks(outputDirectory: URL?) throws {
     let recoveryPrompt = RecoveryPrompt(id: UUID(), deviceName: "内建扬声器", volume: 0.25,
         processes: [PlaybackProcess(pid: 0)], timeout: 60)
     var restored = false; var keptSilent = false
-    delegate.recoveryPresenter.onRestore = { _ in restored = true }
+    var selectedTarget: Int?
+    delegate.recoveryPresenter.onRestore = { _, target in restored = true; selectedTarget = target }
     delegate.recoveryPresenter.onKeepSilent = { _ in keptSilent = true }
     delegate.recoveryPresenter.show(recoveryPrompt)
     let recoveryPanel = delegate.recoveryPresenter.currentPanel!
     recoveryPanel.appearance = NSAppearance(named: .aqua); recoveryPanel.contentView?.layoutSubtreeIfNeeded()
     precondition(recoveryPanel.styleMask.contains(.nonactivatingPanel) && recoveryPanel.level == .floating)
-    precondition(recoveryPanel.frame.size == NSSize(width: 420, height: 264))
+    precondition(recoveryPanel.frame.size == NSSize(width: 420, height: 350))
     let closeButton = recoveryPanel.standardWindowButton(.closeButton)!
     precondition(closeButton.toolTip == "暂时关闭；下次播放仍会提醒")
     let recoveryViews = descendants(recoveryPanel.contentView!)
@@ -120,24 +121,72 @@ func runUIChecks(outputDirectory: URL?) throws {
     let recoveryLabels = recoveryViews.compactMap { $0 as? NSTextField }.map(\.stringValue)
     precondition(recoveryLabels.contains("声音守卫 · 播放保护") && recoveryLabels.contains("要恢复声音吗？") && recoveryLabels.contains("某个 App 已开始播放"))
     let recoveryButtons = recoveryViews.compactMap { $0 as? NSButton }.filter {
-        ["保持静音，不再提醒", "恢复音量到 25%"].contains($0.title)
+        ["保持静音，不再提醒", "恢复到 25%"].contains($0.title)
     }
     precondition(recoveryButtons.count == 2)
     let buttonRects = recoveryButtons.map { $0.alignmentRect(forFrame: $0.frame) }
     precondition(buttonRects.allSatisfy { abs($0.width - 185) < 0.5 && abs($0.height - 34) < 0.5 })
-    precondition(recoveryButtons.first { $0.title == "恢复音量到 25%" }?.isBordered == false)
+    let restoreButton = recoveryButtons.first { $0.title == "恢复到 25%" }!
+    precondition(restoreButton.isBordered == false)
     precondition(recoveryButtons.allSatisfy { $0.keyEquivalent.isEmpty })
     precondition(recoveryLabels.contains { $0.contains("还剩 60 秒") })
     try render(recoveryPanel.contentView, name: "recovery-prompt-light")
     recoveryPanel.appearance = NSAppearance(named: .darkAqua); recoveryPanel.contentView?.layoutSubtreeIfNeeded()
     try render(recoveryPanel.contentView, name: "recovery-prompt-dark")
-    recoveryButtons.first { $0.title == "恢复音量到 25%" }!.performClick(nil)
+    let slider = recoveryViews.compactMap { $0 as? RecoveryVolumeSlider }.first!
+    let reset = recoveryViews.compactMap { $0 as? NSButton }.first { $0.title == "还原" }!
+    precondition(slider.minValue == 1 && slider.maxValue == 100 && slider.integerValue == 25 && !reset.isEnabled)
+    for percent in [1, 12, 100] {
+        slider.integerValue = percent; slider.sendAction(slider.action, to: slider.target)
+        precondition(restoreButton.title == "恢复到 \(percent)%" && !restored && reset.isEnabled)
+    }
+    recoveryPanel.contentView?.layoutSubtreeIfNeeded()
+    precondition(abs(restoreButton.alignmentRect(forFrame: restoreButton.frame).width - 185) < 0.5)
+    try render(recoveryPanel.contentView, name: "recovery-prompt-selected-100")
+    reset.performClick(nil)
+    precondition(slider.integerValue == 25 && !reset.isEnabled && restoreButton.title == "恢复到 25%")
+    restoreButton.performClick(nil)
+    precondition(selectedTarget == nil)
     precondition(restored && !keptSilent && delegate.recoveryPresenter.currentPanel == nil)
+    restored = false; delegate.recoveryPresenter.show(recoveryPrompt)
+    let selectedViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
+    let selectedSlider = selectedViews.compactMap { $0 as? RecoveryVolumeSlider }.first!
+    precondition(selectedSlider.integerValue == 25)
+    slider.integerValue = 90; slider.sendAction(slider.action, to: slider.target)
+    precondition(selectedViews.compactMap { $0 as? NSButton }.contains { $0.title == "恢复到 25%" })
+    slider.onTracking?(true)
+    precondition(selectedSlider.integerValue == 25)
+    selectedSlider.doubleValue = 12.4; selectedSlider.sendAction(selectedSlider.action, to: selectedSlider.target)
+    precondition(selectedSlider.integerValue == 12 && !restored)
+    selectedViews.compactMap { $0 as? NSButton }.first { $0.title == "恢复到 12%" }!.performClick(nil)
+    precondition(restored && selectedTarget == 12)
     restored = false; delegate.recoveryPresenter.show(recoveryPrompt)
     let keepViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
     keepViews.compactMap { $0 as? NSButton }.first { $0.title == "保持静音，不再提醒" }!.performClick(nil)
     precondition(!restored && keptSilent && delegate.recoveryPresenter.currentPanel == nil)
     keptSilent = false
+    var clock = 100.0
+    delegate.recoveryPresenter.now = { clock }
+    delegate.recoveryPresenter.show(recoveryPrompt)
+    clock = 110; delegate.recoveryPresenter.setTracking(true)
+    clock = 210; delegate.recoveryPresenter.updateCountdown()
+    let pausedLabels = descendants(delegate.recoveryPresenter.currentPanel!.contentView!).compactMap { $0 as? NSTextField }
+    precondition(pausedLabels.contains { $0.stringValue.contains("还剩 50 秒") })
+    delegate.recoveryPresenter.setTracking(false)
+    clock = 259; delegate.recoveryPresenter.updateCountdown()
+    precondition(delegate.recoveryPresenter.currentPanel != nil)
+    clock = 260; delegate.recoveryPresenter.updateCountdown()
+    precondition(delegate.recoveryPresenter.currentPanel == nil && !restored && !keptSilent)
+    delegate.recoveryPresenter.show(RecoveryPrompt(id: UUID(), deviceName: "内建扬声器", volume: 0.001,
+                                                  processes: [], timeout: 60))
+    let quietViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
+    precondition(quietViews.compactMap { $0 as? NSButton }.contains { $0.title == "恢复到 <1%" })
+    delegate.recoveryPresenter.close()
+    delegate.recoveryPresenter.show(recoveryPrompt)
+    delegate.recoveryPresenter.setTracking(true); delegate.recoveryPresenter.expireForTesting()
+    precondition(delegate.recoveryPresenter.currentPanel != nil)
+    delegate.recoveryPresenter.setTracking(false)
+    precondition(delegate.recoveryPresenter.currentPanel == nil && !restored && !keptSilent)
     delegate.recoveryPresenter.show(recoveryPrompt); delegate.recoveryPresenter.expireForTesting()
     precondition(!restored && !keptSilent && delegate.recoveryPresenter.currentPanel == nil)
     delegate.recoveryPresenter.show(recoveryPrompt)
@@ -152,5 +201,5 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
-    print("UI_CHECKS=PASS; ASSERTIONS=50; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
+    print("UI_CHECKS=PASS; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }

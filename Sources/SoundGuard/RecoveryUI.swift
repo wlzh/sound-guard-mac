@@ -75,21 +75,41 @@ enum PlaybackScreenLocator {
     }
 }
 
+final class RecoveryVolumeSlider: NSSlider {
+    var onTracking: ((Bool) -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        onTracking?(true)
+        defer { onTracking?(false) }
+        super.mouseDown(with: event)
+    }
+}
+
 final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var timer: Timer?
-    private var deadline = Date()
+    private var deadline = 0.0
+    private var trackingStarted: TimeInterval?
+    private var selectedPercent: Int?
+    private var slider: RecoveryVolumeSlider?
+    private var volumeLabel: NSTextField?
+    private var restoreButton: NSButton?
+    private var resetButton: NSButton?
+    var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    private var originalVolumeText: String {
+        let percent = (prompt?.volume ?? 0) * 100
+        return percent < 1 ? "<1%" : "\(Int(percent.rounded()))%"
+    }
     private var prompt: RecoveryPrompt?
     private var countdown: NSTextField?
-    var onRestore: ((RecoveryPrompt) -> Void)?
+    var onRestore: ((RecoveryPrompt, Int?) -> Void)?
     var onKeepSilent: ((RecoveryPrompt) -> Void)?
     var currentPanel: NSPanel? { panel }
     var currentPromptID: UUID? { prompt?.id }
 
     func show(_ prompt: RecoveryPrompt) {
         close()
-        self.prompt = prompt; deadline = Date().addingTimeInterval(prompt.timeout)
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 264),
+        self.prompt = prompt; deadline = now() + prompt.timeout
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 420, height: 350),
             styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false)
         panel.title = "声音守卫"; panel.titleVisibility = .hidden; panel.titlebarAppearsTransparent = true
@@ -108,20 +128,44 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
             UI.stack([eyebrow, UI.label("要恢复声音吗？", size: 17, weight: .semibold),
                       UI.label("\(appName) 已开始播放", size: 12, color: .secondaryLabelColor)], spacing: 3)
         ], vertical: false, spacing: 12)
-        let volume = UI.label("\(Int(prompt.volume * 100))%", size: 24, weight: .semibold)
+        let originalPercent = Int((prompt.volume * 100).rounded())
+        let volume = UI.label(originalVolumeText, size: 24, weight: .semibold)
+        self.volumeLabel = volume
         volume.font = .monospacedDigitSystemFont(ofSize: 24, weight: .semibold)
         volume.alignment = .right
-        let summary = UI.row(title: "归零前的系统音量", detail: prompt.deviceName, control: volume)
-        let card = UI.group([summary], width: 380)
+        let summary = UI.row(title: "恢复音量", detail: prompt.deviceName, control: volume)
+        let slider = RecoveryVolumeSlider(value: Double(max(1, originalPercent)), minValue: 1, maxValue: 100,
+                                          target: self, action: #selector(volumeChanged(_:)))
+        slider.isContinuous = true
+        slider.setAccessibilityLabel("待恢复音量，百分比；确认后生效")
+        slider.onTracking = { [weak self] tracking in
+            guard let self, self.prompt?.id == prompt.id else { return }
+            self.setTracking(tracking)
+        }
+        self.slider = slider
+        let reset = NSButton(title: "还原", target: self, action: #selector(resetVolume))
+        reset.bezelStyle = .inline; reset.isEnabled = false
+        reset.setAccessibilityLabel("选择归零前的原始音量，不立即出声")
+        self.resetButton = reset
+        let endpoints = UI.stack([UI.label("1%", size: 11, color: .secondaryLabelColor), NSView(),
+                                  UI.label("100%", size: 11, color: .secondaryLabelColor)], vertical: false)
+        let original = UI.stack([UI.label("归零前 \(originalVolumeText)", size: 11, color: .secondaryLabelColor),
+                                 NSView(), reset], vertical: false)
+        let controls = UI.stack([slider, endpoints, original], spacing: 3)
+        for row in [endpoints, original] { row.widthAnchor.constraint(equalTo: controls.widthAnchor).isActive = true }
+        slider.widthAnchor.constraint(equalTo: controls.widthAnchor).isActive = true
+        let card = UI.group([summary, controls], width: 380)
         let countdown = UI.label("", size: 12, weight: .medium, color: .secondaryLabelColor)
         self.countdown = countdown
         let keep = UI.actionButton("保持静音，不再提醒", target: self, action: #selector(keepSilent), width: 185)
         keep.setAccessibilityLabel("保持静音，并且不再提醒本次自动归零")
-        let restore = UI.actionButton("恢复音量到 \(Int(prompt.volume * 100))%", target: self,
+        let restore = UI.actionButton("恢复到 \(originalVolumeText)", target: self,
                                       action: #selector(restore), primary: true, width: 185)
-        restore.setAccessibilityLabel("确认恢复系统音量至 \(Int(prompt.volume * 100))%")
+        restore.setAccessibilityLabel("确认恢复系统音量至 \(originalVolumeText)")
+        self.restoreButton = restore
         let actions = UI.stack([keep, restore], vertical: false, spacing: 10)
-        let body = UI.stack([heading, card, countdown, actions], spacing: 12)
+        let hint = UI.label("滑动仅选择音量，确认后才会出声。", size: 11, color: .secondaryLabelColor)
+        let body = UI.stack([heading, card, hint, countdown, actions], spacing: 10)
         actions.alignment = .centerY
         body.translatesAutoresizingMaskIntoConstraints = false
         let root = NativeSurface(); panel.contentView = root; root.addSubview(body)
@@ -143,25 +187,54 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
         RunLoop.main.add(timer!, forMode: .common)
     }
 
-    @objc private func updateCountdown() {
-        let remaining = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
+    @objc func updateCountdown() {
+        let remaining = max(0, Int(ceil(deadline - (trackingStarted ?? now()))))
         countdown?.stringValue = "还剩 \(remaining) 秒 · 超时后关闭，下次播放仍提醒"
-        if remaining == 0 { close() }
+        if remaining == 0 && trackingStarted == nil { close() }
     }
-    func expireForTesting() { deadline = .distantPast; updateCountdown() }
+    func setTracking(_ tracking: Bool) {
+        let now = now()
+        if tracking { if trackingStarted == nil { trackingStarted = now } }
+        else if let started = trackingStarted { deadline += now - started; trackingStarted = nil }
+        updateCountdown()
+    }
+    @objc private func volumeChanged(_ sender: NSSlider) {
+        guard prompt != nil, sender === slider else { return }
+        selectedPercent = max(1, min(100, Int(sender.doubleValue.rounded())))
+        sender.integerValue = selectedPercent!
+        updateSelection()
+    }
+    @objc private func resetVolume() {
+        selectedPercent = nil
+        slider?.integerValue = max(1, Int(((prompt?.volume ?? 0) * 100).rounded()))
+        updateSelection()
+    }
+    private func updateSelection() {
+        let text = selectedPercent.map { "\($0)%" } ?? originalVolumeText
+        volumeLabel?.stringValue = text
+        restoreButton?.title = "恢复到 \(text)"
+        restoreButton?.setAccessibilityLabel("确认恢复系统音量至 \(text)")
+        resetButton?.isEnabled = selectedPercent != nil
+    }
+    func expireForTesting() { deadline = 0; updateCountdown() }
     @objc private func keepSilent() {
         guard let prompt else { close(); return }
         close(); onKeepSilent?(prompt)
     }
     @objc private func restore() {
         guard let prompt else { close(); return }
-        close(); onRestore?(prompt)
+        let target = selectedPercent
+        close(); onRestore?(prompt, target)
     }
     func close() {
         timer?.invalidate(); timer = nil; panel?.orderOut(nil); panel?.close(); panel = nil
-        prompt = nil; countdown = nil
+        clearSelection()
     }
     func windowWillClose(_ notification: Notification) {
-        timer?.invalidate(); timer = nil; panel = nil; prompt = nil; countdown = nil
+        timer?.invalidate(); timer = nil; panel = nil; clearSelection()
+    }
+    private func clearSelection() {
+        prompt = nil; countdown = nil; trackingStarted = nil; selectedPercent = nil
+        slider = nil; volumeLabel = nil; restoreButton = nil; resetButton = nil
     }
 }

@@ -228,14 +228,16 @@ public final class GuardController {
             lastAction = "已手动归零"; policy.reset(); writeFault = nil; refresh()
         } catch { writeFault = error.localizedDescription; fail(error) }
     }
-    public func restoreVolume(for promptID: UUID) throws {
+    public func restoreVolume(for promptID: UUID, targetPercent: Int? = nil) throws {
         guard running, !sleeping, !retryPending, preferences.enabled, preferences.recoveryPromptEnabled,
               let saved = recovery, saved.id == promptID else { throw GuardError("恢复请求已失效") }
+        let snapshot = try saved.originalVolume.restoring(toPercent: targetPercent)
         let current = try audio.currentDevice()
         guard let current, current.id == saved.zeroDevice.id,
               current.selectionID == saved.zeroDevice.selectionID, current.volume == 0,
-              current.muted == saved.zeroDevice.muted else { recovery = nil; throw GuardError("设备或音量已变化，未恢复音量") }
-        try audio.restore(current, snapshot: saved.originalVolume)
+              current.muted == saved.zeroDevice.muted, current.controllable,
+              preferences.includes(current) else { recovery = nil; throw GuardError("设备或音量已变化，未恢复音量") }
+        try audio.restore(current, snapshot: snapshot)
         recovery = nil; recoveryMonitoringActive = false
         recoveryEndReason = "已确认恢复音量"
         lastAction = "已确认恢复音量"
