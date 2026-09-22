@@ -12,7 +12,11 @@ final class SettingsDocument: NSView { override var isFlipped: Bool { true } }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     let audio = SystemAudio()
-    let defaults = UserDefaults.standard
+    let defaults: UserDefaults
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        super.init()
+    }
     lazy var controller = GuardController(audio: audio, scheduler: DeadlineScheduler(),
         preferences: Preferences.decode(defaults.data(forKey: "preferences.v1")))
     var status: NSStatusItem!

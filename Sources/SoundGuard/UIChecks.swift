@@ -3,7 +3,11 @@ import GuardCore
 
 func runUIChecks(outputDirectory: URL?) throws {
     _ = NSApplication.shared; NSApp.appearance = NSAppearance(named: .aqua)
-    let delegate = AppDelegate()
+    let originalPreferences = UserDefaults.standard.data(forKey: "preferences.v1")
+    let suite = "uk.869hr.SoundGuard.UIChecks.\(UUID().uuidString)"
+    let testDefaults = UserDefaults(suiteName: suite)!
+    defer { testDefaults.removePersistentDomain(forName: suite) }
+    let delegate = AppDelegate(defaults: testDefaults)
     let builtIn = OutputDevice(id: 1, uid: "demo-speaker", name: "内建扬声器", builtInSpeaker: true, volume: 0)
     let headphones = OutputDevice(id: 2, uid: "demo-headphones", name: "Studio Headphones", builtInSpeaker: false, volume: 0.3)
     delegate.previewDevices = [builtIn, headphones,
@@ -201,5 +205,6 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
-    print("UI_CHECKS=PASS; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
+    precondition(UserDefaults.standard.data(forKey: "preferences.v1") == originalPreferences)
+    print("UI_CHECKS=PASS; PREFERENCES_ISOLATED=PASS; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }

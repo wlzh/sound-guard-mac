@@ -7,3 +7,5 @@ GuardController.restoreVolume 新增可选 targetPercent 参数，默认 nil 兼
 RecoveryPromptPresenter.onRestore 改为 (RecoveryPrompt, Int?)，主程序传递选择；弹窗关闭前捕获目标，关闭时释放控件和选择。RecoveryVolumeSlider 使用原生 mouseDown tracking，defer 结束暂停，UUID 检查阻止旧拖动污染新提示。单调时钟替代墙钟，计时测试注入 now；计时器仍每秒一次。选择不持久化，无偏好迁移、权限或采集变更。
 
 接口影响：新增快照变换方法；修改恢复回调和控制器可选参数；无删除接口。核心测试覆盖比例、非法值、精度、上下文消费和外部变化；UI 测试覆盖边界、取整、重置、按钮、暂停与关闭。
+
+build 14：AppDelegate 接受注入的 UserDefaults，正式运行默认使用 standard；UI 自测注入 UUID 临时 suite，结束时清理，断言正式 preferences.v1 原始数据未改变，避免安装包内自测覆盖用户设置。
