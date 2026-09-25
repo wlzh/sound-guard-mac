@@ -9,7 +9,12 @@ extension AppDelegate {
         var detail = device?.name ?? "连接输出设备后自动核对"
         var volume = device.flatMap { $0.controllable && $0.volume.isFinite ? "\(Int(max(0, min(1, $0.volume)) * 100))%" : nil }
         if case .fault(let message) = displayState { detail = message; volume = nil }
-        if case .retrying = displayState { detail = "等待系统音频资源释放"; volume = nil }
+        if case .retrying = displayState {
+            detail = controller.automaticRetryPending
+                ? "检测暂时中断，自动重试 \(controller.automaticRetryCount)/3"
+                : "等待系统音频资源释放"
+            volume = nil
+        }
         header.view = UI.menuHeader(headline: GuardPresentation.headline(displayState, now: ProcessInfo.processInfo.systemUptime), detail: detail, volume: volume)
         menu.addItem(header); menu.addItem(.separator())
         item("自动保护", #selector(toggleEnabled), in: menu).state = controller.preferences.enabled ? .on : .off
@@ -34,6 +39,7 @@ extension AppDelegate {
         let help = NSMenuItem(title: "帮助与开源", action: nil, keyEquivalent: "")
         let links = NSMenu()
         item("使用文档", #selector(openGuide), in: links)
+        item("显示诊断文件…", #selector(revealDiagnostics), in: links)
         item("版本记录", #selector(openReleases), in: links)
         item("GitHub 源代码", #selector(openRepository), in: links)
         help.submenu = links; menu.addItem(help)
@@ -58,4 +64,7 @@ extension AppDelegate {
         changeRecoveryPrompt(control)
     }
     @objc func openReleases() { NSWorkspace.shared.open(URL(string: repository + "/releases")!) }
+    @objc func revealDiagnostics() {
+        NSWorkspace.shared.activateFileViewerSelecting([statusDirectory.appendingPathComponent("diagnostics.json")])
+    }
 }

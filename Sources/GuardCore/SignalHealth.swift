@@ -9,7 +9,7 @@ public struct SignalHealth {
         guard now >= started, now >= buffer, now >= sound else { throw GuardError("音频时钟异常，已停止保护") }
         if buffer == 0 && now - started < 3_000_000_000 { return .starting }
         guard buffer > 0, now - buffer < 2_000_000_000 else {
-            throw GuardError("系统音频没有有效回调，请检查录制权限后重新核对")
+            throw GuardError("系统音频没有有效回调", retryable: true)
         }
         guard sound > 0 else { return .idle }
         let lastSound = sound

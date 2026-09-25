@@ -54,8 +54,17 @@ struct Property: Hashable {
     }
 }
 
+public enum AudioErrorClassification {
+    public static func isTransient(_ status: OSStatus) -> Bool {
+        [kAudioHardwareBadObjectError, kAudioHardwareBadDeviceError,
+                         kAudioHardwareBadStreamError, kAudioHardwareNotRunningError,
+                         kAudioHardwareNotReadyError, kAudioHardwareUnspecifiedError].contains(status)
+    }
+}
 func check(_ status: OSStatus, _ operation: String) throws {
-    if status != noErr { throw GuardError("\(operation)失败 (OSStatus \(status))；请重新核对") }
+    if status != noErr {
+        throw GuardError("\(operation)失败 (OSStatus \(status))", retryable: AudioErrorClassification.isTransient(status))
+    }
 }
 
 final class Listeners {

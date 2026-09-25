@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var recoveryConfirmationField: NSTextField?
     var recoveryConfirmationUnitPopup: NSPopUpButton?
     let recoveryPresenter = RecoveryPromptPresenter()
+    lazy var diagnosticJournal = DiagnosticJournal(file: statusDirectory.appendingPathComponent("diagnostics.json"))
     var previewDevices: [OutputDevice]?
     var previewCurrent: OutputDevice?
     var previewState: GuardState?
@@ -69,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.controller.setSleeping(false)
         })
+        controller.onDiagnostic = { [weak self] event in self?.diagnosticJournal.append(event) }
+        diagnosticJournal.append(DiagnosticEvent(kind: "launch", phase: "start",
+            message: "声音守卫 \(AppVersion.current) build \(AppVersion.build)", attempt: 0))
         controller.start()
         statusObserver = DistributedNotificationCenter.default().addObserver(forName: statusRequest, object: nil, queue: .main) { [weak self] _ in
             self?.exportStatus()
@@ -82,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let statusObserver { DistributedNotificationCenter.default().removeObserver(statusObserver) }
     }
     func exportStatus() {
-        let snapshot: [String: Any] = ["pid": ProcessInfo.processInfo.processIdentifier,
+        var snapshot: [String: Any] = ["pid": ProcessInfo.processInfo.processIdentifier,
             "updatedAt": Date().timeIntervalSince1970, "version": AppVersion.current,
             "state": String(describing: controller.state), "volume": controller.device.map { Double($0.volume) } ?? -1,
             "enabled": controller.preferences.enabled, "minutes": controller.preferences.minutes,
@@ -93,7 +97,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "recoveryContextRetained": controller.recoveryContextRetained,
             "recoveryMonitoringActive": controller.recoveryMonitoringActive,
             "recoveryConfirmationActive": controller.recoveryConfirmationActive,
-            "lastAction": controller.lastAction]
+            "lastAction": controller.lastAction,
+            "build": AppVersion.build,
+            "automaticRetryCount": controller.automaticRetryCount,
+            "automaticRetryPending": controller.automaticRetryPending,
+            "retryRemainingSeconds": controller.retryDeadline.map { max(0, $0 - ProcessInfo.processInfo.systemUptime) } ?? 0]
+        if let fault = controller.lastFault ?? diagnosticJournal.events.last(where: { $0.kind == "fault" }),
+           let data = try? JSONEncoder().encode(fault), let json = try? JSONSerialization.jsonObject(with: data) {
+            snapshot["lastFault"] = json
+        }
         do {
             let file = statusDirectory.appendingPathComponent("status.json")
             try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys, .prettyPrinted]).write(to: file, options: .atomic)
@@ -193,7 +205,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func openRepository() { NSWorkspace.shared.open(URL(string: repository)!) }
 }
 
-if CommandLine.arguments.contains("--probe-signal-retry") {
+if CommandLine.arguments.contains("--diagnostics") {
+    let journal = DiagnosticJournal(file: statusDirectory.appendingPathComponent("diagnostics.json"))
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    print(String(data: try encoder.encode(journal.events), encoding: .utf8)!)
+} else if CommandLine.arguments.contains("--probe-signal-retry") {
     exit(runSignalRetryProbe())
 } else if CommandLine.arguments.contains("--status") {
     let since = Date().timeIntervalSince1970

@@ -29,6 +29,9 @@ func runUIChecks(outputDirectory: URL?) throws {
     precondition(menu.items.contains { $0.title == "立即归零" && !$0.isEnabled })
     precondition(menu.items.contains { $0.title == "保护设备…" && $0.action == #selector(AppDelegate.showDeviceSettings) })
     precondition(menu.items.first?.view != nil)
+    precondition(menu.items.first { $0.title == "帮助与开源" }?.submenu?.items.contains {
+        $0.title == "显示诊断文件…" && $0.action == #selector(AppDelegate.revealDiagnostics)
+    } == true)
     delegate.previewState = .retrying
     let retryingMenu = NSMenu(); delegate.menuWillOpen(retryingMenu)
     precondition(retryingMenu.items.contains { $0.title == "重新核对" && !$0.isEnabled })
