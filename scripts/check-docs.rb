@@ -1,4 +1,5 @@
 require 'pathname'
+Encoding.default_external = Encoding::UTF_8
 root = Pathname.new(__dir__).parent
 version = (root / 'VERSION').read.strip
 build = (root / 'BUILD_NUMBER').read.strip

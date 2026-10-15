@@ -31,6 +31,7 @@ extension AppDelegate {
         item("静音流也计时", #selector(toggleSignalFromMenu), in: menu).state = controller.preferences.detectSilentStream ? .on : .off
         item("播放时提示恢复", #selector(toggleRecoveryFromMenu), in: menu).state = controller.preferences.recoveryPromptEnabled ? .on : .off
         item("保护设备…", #selector(showDeviceSettings), in: menu)
+        item("恢复提示应用…", #selector(showApplicationSettings), in: menu)
         let retry = item("重新核对", #selector(retry), in: menu)
         retry.isEnabled = displayState != .retrying
         menu.addItem(.separator())

@@ -205,6 +205,14 @@ func runUIChecks(outputDirectory: URL?) throws {
     precondition(delegate.minutesField == nil && delegate.deviceButtons.count == 3)
     precondition(delegate.deviceButtons.keys.filter { !$0.isEnabled }.count == 1)
     try render(delegate.settings?.contentView, name: "settings-devices")
+    delegate.selectedSettingsPage = 2; delegate.rebuildSettings()
+    let appViews = descendants(delegate.settings!.contentView!)
+    precondition(appViews.compactMap { $0 as? NSButton }.contains { $0.title == "从当前播放进程添加…" })
+    precondition(appViews.compactMap { $0 as? NSButton }.contains { $0.title == "从 Applications 选择…" })
+    var appPreferences = delegate.controller.preferences
+    appPreferences.ignoredRecoveryApps = [IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player")]
+    delegate.controller.configure(appPreferences); delegate.rebuildSettings()
+    precondition(descendants(delegate.settings!.contentView!).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "Player" })
     delegate.menuDidClose(menu); precondition(menu.items.first?.view == nil)
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)

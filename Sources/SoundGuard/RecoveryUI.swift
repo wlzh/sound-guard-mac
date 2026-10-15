@@ -36,6 +36,19 @@ enum PlaybackScreenLocator {
         return "某个 App"
     }
 
+    static func appDescriptor(for process: PlaybackProcess) -> IgnoredRecoveryApp? {
+        if process.bundleIdentifier != nil || process.bundlePath != nil {
+            return IgnoredRecoveryApp(bundleIdentifier: process.bundleIdentifier,
+                                      bundlePath: process.bundlePath,
+                                      name: process.name ?? "未命名 App")
+        }
+        guard process.pid > 0, let app = owningApplication(for: process.pid) else { return nil }
+        let path = app.bundleURL?.standardizedFileURL.path
+        guard app.bundleIdentifier != nil || path != nil else { return nil }
+        return IgnoredRecoveryApp(bundleIdentifier: app.bundleIdentifier, bundlePath: path,
+                                  name: app.localizedName ?? "未命名 App")
+    }
+
     private static func owningApplication(for pid: pid_t) -> NSRunningApplication? {
         guard pid > 0, let direct = NSRunningApplication(processIdentifier: pid) else { return nil }
         if direct.activationPolicy == .regular { return direct }

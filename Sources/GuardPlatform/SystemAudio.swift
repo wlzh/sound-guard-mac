@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import AppKit
 import GuardCore
 
 public final class SystemAudio: AudioService {
@@ -161,13 +162,32 @@ public final class SystemAudio: AudioService {
                 let devices = try Property(process, kAudioProcessPropertyDevices, kAudioObjectPropertyScopeOutput).array()
                 guard devices.contains(device.id) else { continue }
                 let pid = (try? Property(process, kAudioProcessPropertyPID).scalar(pid_t(0))) ?? 0
-                result.append(PlaybackProcess(pid: pid))
+                result.append(Self.playbackProcess(pid: pid))
             } catch {
                 let current = try Property(system, kAudioHardwarePropertyProcessObjectList).array()
                 if current.contains(process) { throw error }
             }
         }
         return result
+    }
+    private static func playbackProcess(pid: pid_t) -> PlaybackProcess {
+        guard pid > 0, let direct = NSRunningApplication(processIdentifier: pid) else {
+            return PlaybackProcess(pid: pid)
+        }
+        let app = outerApplication(for: direct)
+        return PlaybackProcess(pid: pid, bundleIdentifier: app.bundleIdentifier,
+                               bundlePath: app.bundleURL?.standardizedFileURL.path,
+                               name: app.localizedName)
+    }
+    private static func outerApplication(for application: NSRunningApplication) -> NSRunningApplication {
+        guard application.activationPolicy != .regular,
+              let path = application.bundleURL?.standardizedFileURL.path else { return application }
+        let parts = URL(fileURLWithPath: path).pathComponents
+        guard let appIndex = parts.firstIndex(where: { $0.hasSuffix(".app") }) else { return application }
+        let outerPath = NSString.path(withComponents: Array(parts.prefix(through: appIndex)))
+        return NSWorkspace.shared.runningApplications.first {
+            $0.activationPolicy == .regular && $0.bundleURL?.standardizedFileURL.path == outerPath
+        } ?? application
     }
     public func zero(_ expected: OutputDevice) throws -> VolumeSnapshot {
         guard let current = try currentDevice(), current.id == expected.id,

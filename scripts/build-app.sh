@@ -10,7 +10,7 @@ swift build -c release --product SoundGuard --triple x86_64-apple-macosx14.2
 INTEL="$(swift build -c release --triple x86_64-apple-macosx14.2 --show-bin-path)"
 lipo -create "$ARM/SoundGuard" "$INTEL/SoundGuard" -output "$APP/Contents/MacOS/SoundGuard"
 strip -S "$APP/Contents/MacOS/SoundGuard"
-if rg -a -q '/Users/|/home/' "$APP/Contents/MacOS/SoundGuard"; then
+if grep -a -qE '/Users/|/home/' "$APP/Contents/MacOS/SoundGuard"; then
     echo 'Release binary contains a local user path' >&2
     exit 1
 fi

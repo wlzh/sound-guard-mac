@@ -50,6 +50,25 @@ final class PolicyTests: XCTestCase {
         XCTAssertFalse(p.recoveryPromptEnabled); XCTAssertEqual(p.recoveryPromptSeconds, 60)
         XCTAssertEqual(p.recoveryPlaybackConfirmationMilliseconds, 2_000)
         XCTAssertEqual(p.recoveryPlaybackConfirmation, 2)
+        XCTAssertTrue(p.ignoredRecoveryApps.isEmpty)
+    }
+    func testIgnoredRecoveryAppIdentityAndMigration() throws {
+        let app = IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", bundlePath: "/Applications/Player.app", name: "Player")
+        var p = Preferences(); p.ignoredRecoveryApps = [app, app]
+        let decoded = Preferences.decode(try JSONEncoder().encode(p))
+        XCTAssertEqual(decoded.ignoredRecoveryApps.count, 1)
+        let process = PlaybackProcess(pid: 9, bundleIdentifier: "com.example.Player", bundlePath: "/other/Player.app", name: "Player")
+        XCTAssertNil(decoded.recoveryPromptProcesses(from: [process]))
+        let legacy = Preferences.decode(Data(#"{"enabled":true,"minutes":5}"#.utf8))
+        XCTAssertTrue(legacy.ignoredRecoveryApps.isEmpty)
+        XCTAssertNotNil(decoded.recoveryPromptProcesses(from: [PlaybackProcess(pid: 0)]))
+    }
+    func testIgnoredRecoveryAppMixedPlaybackStillPrompts() {
+        var p = Preferences(); p.ignoredRecoveryApps = [IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player")]
+        let ignored = PlaybackProcess(pid: 1, bundleIdentifier: "com.example.Player", name: "Player")
+        let other = PlaybackProcess(pid: 2, bundleIdentifier: "com.example.Other", name: "Other")
+        XCTAssertEqual(p.recoveryPromptProcesses(from: [ignored, other]), [other])
+        XCTAssertNil(p.recoveryPromptProcesses(from: [ignored]))
     }
     func testTimeoutValidation() {
         for (minutes, seconds) in [(1, 60), (120, 7200), (0, 300), (-1, 300), (121, 300)] {
@@ -908,7 +927,10 @@ let meterTests = MeterTests()
 let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
     (policyTests, [
         ("status presentation", policyTests.testStatusPresentation),
-        ("defaults", policyTests.testDefaultSettings), ("timeout bounds", policyTests.testTimeoutValidation),
+        ("defaults", policyTests.testDefaultSettings),
+        ("ignored app identity", policyTests.testIgnoredRecoveryAppIdentityAndMigration),
+        ("ignored app mixed playback", policyTests.testIgnoredRecoveryAppMixedPlaybackStillPrompts),
+        ("timeout bounds", policyTests.testTimeoutValidation),
         ("preferences persistence", policyTests.testPreferencesRoundTrip), ("corrupt preferences", policyTests.testCorruptPreferencesUseDefaults),
         ("legacy preferences migration", policyTests.testLegacyPreferencesMigration), ("recovery timeout bounds", policyTests.testRecoveryTimeoutValidation),
         ("recovery confirmation bounds", policyTests.testRecoveryConfirmationValidation),

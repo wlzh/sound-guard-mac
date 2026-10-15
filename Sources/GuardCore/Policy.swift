@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.3.9"
-    public static let build = "15"
+    public static let current = "0.4.0"
+    public static let build = "16"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -14,7 +14,20 @@ public struct Preferences: Codable, Equatable {
     public var recoveryPromptEnabled = false
     public var recoveryPromptSeconds = 60
     public var recoveryPlaybackConfirmationMilliseconds = 2_000
+    public var ignoredRecoveryApps: [IgnoredRecoveryApp] = []
     public init() {}
+    public var ignoredRecoveryAppIdentities: Set<String> {
+        Set(ignoredRecoveryApps.flatMap { $0.identities })
+    }
+    public func isIgnoredRecoveryApp(_ process: PlaybackProcess) -> Bool {
+        guard !process.identities.isEmpty else { return false }
+        return ignoredRecoveryApps.contains { $0.matches(process) }
+    }
+    public func recoveryPromptProcesses(from processes: [PlaybackProcess]) -> [PlaybackProcess]? {
+        guard !processes.isEmpty else { return [] }
+        let ignoredOnly = processes.allSatisfy { isIgnoredRecoveryApp($0) }
+        return ignoredOnly ? nil : processes.filter { !isIgnoredRecoveryApp($0) }
+    }
     public var timeout: TimeInterval { Double((1...120).contains(minutes) ? minutes : 5) * 60 }
     public var recoveryPromptTimeout: TimeInterval { Double((5...600).contains(recoveryPromptSeconds) ? recoveryPromptSeconds : 60) }
     public var recoveryPlaybackConfirmation: TimeInterval {
@@ -30,11 +43,13 @@ public struct Preferences: Codable, Equatable {
         if !(500...30_000).contains(value.recoveryPlaybackConfirmationMilliseconds) {
             value.recoveryPlaybackConfirmationMilliseconds = 2_000
         }
+        value.ignoredRecoveryApps = Array(Set(value.ignoredRecoveryApps.filter { !$0.name.isEmpty && !$0.identities.isEmpty }))
         return value
     }
     private enum CodingKeys: String, CodingKey {
         case enabled, minutes, detectSilentStream, protectBuiltIn, selectedDevices
         case recoveryPromptEnabled, recoveryPromptSeconds, recoveryPlaybackConfirmationMilliseconds
+        case ignoredRecoveryApps
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,6 +62,29 @@ public struct Preferences: Codable, Equatable {
         recoveryPromptSeconds = try values.decodeIfPresent(Int.self, forKey: .recoveryPromptSeconds) ?? 60
         recoveryPlaybackConfirmationMilliseconds = try values.decodeIfPresent(
             Int.self, forKey: .recoveryPlaybackConfirmationMilliseconds) ?? 2_000
+        ignoredRecoveryApps = try values.decodeIfPresent([IgnoredRecoveryApp].self, forKey: .ignoredRecoveryApps) ?? []
+    }
+}
+
+public struct IgnoredRecoveryApp: Codable, Equatable, Hashable {
+    public let bundleIdentifier: String?
+    public let bundlePath: String?
+    public let name: String
+    public init(bundleIdentifier: String? = nil, bundlePath: String? = nil, name: String) {
+        self.bundleIdentifier = bundleIdentifier?.isEmpty == true ? nil : bundleIdentifier
+        self.bundlePath = bundlePath?.isEmpty == true ? nil : bundlePath
+        self.name = name
+    }
+    public var identities: [String] {
+        [bundleIdentifier.map { "bundle:\($0)" }, bundlePath.map { "path:\($0)" }].compactMap { $0 }
+    }
+    public var identity: String? { identities.first }
+    public func matches(_ process: PlaybackProcess) -> Bool {
+        if let bundleIdentifier, let processIdentifier = process.bundleIdentifier {
+            return bundleIdentifier == processIdentifier
+        }
+        guard bundleIdentifier == nil, let bundlePath, let processPath = process.bundlePath else { return false }
+        return bundlePath == processPath
     }
 }
 
@@ -71,7 +109,16 @@ public struct OutputDevice: Equatable {
 public enum Playback: Equatable { case idle, playing, starting, unknown }
 public struct PlaybackProcess: Equatable {
     public let pid: Int32
-    public init(pid: Int32) { self.pid = pid }
+    public let bundleIdentifier: String?
+    public let bundlePath: String?
+    public let name: String?
+    public init(pid: Int32, bundleIdentifier: String? = nil, bundlePath: String? = nil, name: String? = nil) {
+        self.pid = pid; self.bundleIdentifier = bundleIdentifier; self.bundlePath = bundlePath; self.name = name
+    }
+    public var identities: [String] {
+        [bundleIdentifier.map { "bundle:\($0)" }, bundlePath.map { "path:\($0)" }].compactMap { $0 }
+    }
+    public var applicationIdentity: String? { identities.first }
 }
 public struct VolumeSnapshot: Equatable {
     public let values: [Float]

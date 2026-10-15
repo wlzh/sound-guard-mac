@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import ServiceManagement
+import UniformTypeIdentifiers
 import GuardCore
 
 extension AppDelegate {
@@ -10,6 +11,7 @@ extension AppDelegate {
     }
     @objc func showGeneralSettings() { selectedSettingsPage = 0; showSettings() }
     @objc func showDeviceSettings() { selectedSettingsPage = 1; showSettings() }
+    @objc func showApplicationSettings() { selectedSettingsPage = 2; showSettings() }
     @objc func selectSettingsPage(_ sender: NSSegmentedControl) { selectedSettingsPage = sender.selectedSegment; rebuildSettings() }
     @objc func showSettings() {
         if settings == nil { settings = window("声音守卫设置", width: 580, height: 650) }
@@ -25,9 +27,9 @@ extension AppDelegate {
             UI.image(BrandAssets.icon(size: 48), size: 48),
             UI.stack([UI.label("声音守卫", size: 20, weight: .semibold), UI.label("闲置自动归零，开启由你决定。", size: 12, color: .secondaryLabelColor)], spacing: 4)
         ], vertical: false, spacing: 12)
-        let tabs = NSSegmentedControl(labels: ["常规", "设备"], trackingMode: .selectOne, target: self, action: #selector(selectSettingsPage(_:)))
+        let tabs = NSSegmentedControl(labels: ["常规", "设备", "应用"], trackingMode: .selectOne, target: self, action: #selector(selectSettingsPage(_:)))
         tabs.selectedSegment = selectedSettingsPage; tabs.segmentStyle = .rounded
-        tabs.setWidth(110, forSegment: 0); tabs.setWidth(110, forSegment: 1)
+        for index in 0..<3 { tabs.setWidth(105, forSegment: index) }
         tabs.setAccessibilityLabel("设置分类")
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true
         let footer = UI.label("未经你点击确认，声音守卫不会恢复音量。", size: 12, color: .secondaryLabelColor, centered: true)
@@ -47,7 +49,7 @@ extension AppDelegate {
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22)
         ])
         window.contentView = root; root.layoutSubtreeIfNeeded()
-        let page = selectedSettingsPage == 0 ? generalSettingsPage() : deviceSettingsPage()
+        let page = selectedSettingsPage == 0 ? generalSettingsPage() : selectedSettingsPage == 1 ? deviceSettingsPage() : applicationSettingsPage()
         let document = SettingsDocument(frame: NSRect(x: 0, y: 0, width: 524, height: scroll.contentSize.height))
         page.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(page)
         NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: document.leadingAnchor), page.topAnchor.constraint(equalTo: document.topAnchor), page.widthAnchor.constraint(equalToConstant: 524)])
@@ -151,6 +153,77 @@ extension AppDelegate {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+    }
+    func applicationSettingsPage() -> NSStackView {
+        let apps = controller.preferences.ignoredRecoveryApps
+        var rows: [NSView] = []
+        for app in apps {
+            let remove = NSButton(title: "移除", target: self, action: #selector(removeIgnoredApplication(_:)))
+            remove.bezelStyle = .inline; remove.identifier = NSUserInterfaceItemIdentifier(app.identity ?? app.name)
+            remove.setAccessibilityLabel("移除忽略恢复提示的 \(app.name)")
+            rows.append(UI.row(title: app.name, detail: app.bundleIdentifier ?? app.bundlePath ?? "无法显示身份", control: remove))
+        }
+        if rows.isEmpty { rows.append(UI.label("尚未添加应用。名单中的应用播放时不会弹出恢复提示。", size: 12, color: .secondaryLabelColor)) }
+        let current = NSButton(title: "从当前播放进程添加…", target: self, action: #selector(addCurrentPlaybackApplication))
+        current.setAccessibilityLabel("从当前播放进程添加忽略应用")
+        let applications = NSButton(title: "从 Applications 选择…", target: self, action: #selector(addApplications))
+        applications.setAccessibilityLabel("从 Applications 选择忽略应用")
+        return UI.stack([
+            UI.section("恢复提示例外"),
+            UI.label("仅抑制自动归零后的恢复窗口，不阻止应用播放，也不影响自动归零。无法识别的播放来源仍会提示。", size: 12, color: .secondaryLabelColor),
+            UI.group(rows),
+            UI.stack([current, applications], vertical: false, spacing: 10)
+        ], spacing: 12)
+    }
+    @objc func removeIgnoredApplication(_ sender: NSButton) {
+        guard let identity = sender.identifier?.rawValue else { return }
+        var p = controller.preferences
+        p.ignoredRecoveryApps.removeAll { $0.identity == identity }
+        save(p); rebuildSettings()
+    }
+    @objc func addCurrentPlaybackApplication() {
+        guard let device = displayDevice else { showError("当前没有输出设备"); return }
+        do {
+            let processes = try audio.playingProcesses(for: device)
+            let descriptors = processes.compactMap(PlaybackScreenLocator.appDescriptor(for:))
+            guard !descriptors.isEmpty else { showError("当前没有可识别的播放 App"); return }
+            chooseIgnoredApplications(descriptors)
+        } catch { showError("读取当前播放进程失败：" + error.localizedDescription) }
+    }
+    @objc func addApplications() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
+        panel.canChooseFiles = true; panel.prompt = "添加"
+        guard panel.runModal() == .OK else { return }
+        let descriptors = panel.urls.compactMap { url -> IgnoredRecoveryApp? in
+            let bundle = Bundle(url: url)
+            guard bundle?.bundleIdentifier != nil || url.pathExtension == "app" else { return nil }
+            return IgnoredRecoveryApp(bundleIdentifier: bundle?.bundleIdentifier,
+                                      bundlePath: url.standardizedFileURL.path,
+                                      name: bundle?.localizedInfoDictionary?["CFBundleDisplayName"] as? String
+                                          ?? bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String
+                                          ?? url.deletingPathExtension().lastPathComponent)
+        }
+        guard !descriptors.isEmpty else { showError("所选项目不是可识别的 App"); return }
+        mergeIgnoredApplications(descriptors)
+    }
+    private func chooseIgnoredApplications(_ descriptors: [IgnoredRecoveryApp]) {
+        let alert = NSAlert(); alert.messageText = "选择忽略恢复提示的 App"
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
+        popup.addItems(withTitles: descriptors.map(\.name)); alert.accessoryView = popup
+        alert.addButton(withTitle: "添加"); alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        mergeIgnoredApplications([descriptors[popup.indexOfSelectedItem]])
+    }
+    private func mergeIgnoredApplications(_ descriptors: [IgnoredRecoveryApp]) {
+        var p = controller.preferences
+        var existing = Set(p.ignoredRecoveryApps.compactMap(\.identity))
+        for descriptor in descriptors {
+            guard let identity = descriptor.identity, existing.insert(identity).inserted else { continue }
+            p.ignoredRecoveryApps.append(descriptor)
+        }
+        save(p); rebuildSettings()
     }
     func deviceSettingsPage() -> NSStackView {
         let p = controller.preferences

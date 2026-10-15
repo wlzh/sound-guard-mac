@@ -57,6 +57,7 @@ public final class GuardController {
         let zeroDevice: OutputDevice
         let originalVolume: VolumeSnapshot
         var playbackWasActive = false
+        var playbackWasIgnoredOnly = false
         var candidateSince: TimeInterval?
     }
     private var recovery: RecoveryContext?
@@ -78,6 +79,7 @@ public final class GuardController {
     public func configure(_ value: Preferences) {
         let detectionModeChanged = value.detectSilentStream != preferences.detectSilentStream
         let confirmationChanged = value.recoveryPlaybackConfirmationMilliseconds != preferences.recoveryPlaybackConfirmationMilliseconds
+        let ignoredAppsChanged = value.ignoredRecoveryApps != preferences.ignoredRecoveryApps
         let changed = value != preferences
         let needsRestart = retryPending || detectionFault != nil
         preferences = value; policy.reset()
@@ -86,7 +88,9 @@ public final class GuardController {
             if recovery != nil { recoveryEndReason = "保护或恢复设置已变更" }
             recovery = nil
         }
-        else if confirmationChanged { recovery?.candidateSince = nil }
+        else if confirmationChanged || ignoredAppsChanged {
+            recovery?.candidateSince = nil; recovery?.playbackWasActive = false; recovery?.playbackWasIgnoredOnly = false
+        }
         if changed {
             record("settings", "设置变更，取消旧重试任务")
             automaticRetryCount = 0; healthySince = nil; detectionFault = nil
@@ -210,6 +214,7 @@ public final class GuardController {
                 let processes = preferences.detectSilentStream
                     ? ((try? audio.playingProcesses(for: current)) ?? [])
                     : (try audio.playingProcesses(for: current))
+                let promptProcesses = preferences.recoveryPromptProcesses(from: processes)
                 let playing: Bool
                 if preferences.detectSilentStream {
                     do {
@@ -233,6 +238,13 @@ public final class GuardController {
                 }
                 var prompt: RecoveryPrompt?
                 if playing {
+                    if promptProcesses == nil {
+                        saved.candidateSince = nil; saved.playbackWasActive = true; saved.playbackWasIgnoredOnly = true
+                        recovery = saved
+                        onUpdate?()
+                        return
+                    }
+                    if saved.playbackWasIgnoredOnly { saved.playbackWasActive = false; saved.playbackWasIgnoredOnly = false }
                     if !saved.playbackWasActive {
                         let instant = now()
                         if saved.candidateSince == nil { saved.candidateSince = instant }
@@ -240,7 +252,7 @@ public final class GuardController {
                         if instant >= deadline {
                             saved.candidateSince = nil; saved.playbackWasActive = true
                             prompt = RecoveryPrompt(id: saved.id, deviceName: current.name,
-                                volume: saved.originalVolume.displayVolume, processes: processes,
+                                volume: saved.originalVolume.displayVolume, processes: promptProcesses ?? [],
                                 timeout: preferences.recoveryPromptTimeout)
                         } else {
                             let token = generation
