@@ -717,6 +717,22 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(audio.restoreWrites, 1); XCTAssertEqual(audio.device?.volume, 0.4)
         XCTAssertFalse(controller.recoveryMonitoringActive)
     }
+    func testChangingIgnoredAppsInvalidatesVisiblePrompt() throws {
+        var p = Preferences(); p.recoveryPromptEnabled = true; p.recoveryPlaybackConfirmationMilliseconds = 500
+        controller.configure(p)
+        var prompt: RecoveryPrompt?; controller.onRecoveryPrompt = { prompt = $0 }
+        controller.start(); time = 300; scheduler.action?()
+        audio.sources = [PlaybackProcess(pid: 1, bundleIdentifier: "com.example.Player", name: "Player")]
+        audio.onChange?(); time = 301; scheduler.action?()
+        XCTAssertNotNil(prompt); XCTAssertNotNil(controller.recoveryPromptID)
+        p.ignoredRecoveryApps = [IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player")]
+        controller.configure(p)
+        XCTAssertNil(controller.recoveryPromptID)
+        do { try controller.restoreVolume(for: prompt!.id); XCTAssertTrue(false) } catch { XCTAssertEqual(audio.restoreWrites, 0) }
+        audio.sources = []; audio.onChange?()
+        audio.sources = [PlaybackProcess(pid: 2, bundleIdentifier: "com.example.Other", name: "Other")]; audio.onChange?()
+        completeRecoveryConfirmation(); XCTAssertNotNil(controller.recoveryPromptID)
+    }
     func testSynchronousRecoveryCallbackCannotResurrectContext() {
         var p = Preferences(); p.recoveryPromptEnabled = true; controller.configure(p)
         controller.onRecoveryPrompt = { [unowned self] prompt in try? self.controller.restoreVolume(for: prompt.id) }
@@ -993,6 +1009,7 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("unknown playback", controllerTests.testUnknownPlaybackCancels),
         ("recovery playback edge", controllerTests.testAutoZeroArmsRecoveryAndPromptsOnPlaybackEdge),
         ("recovery callback reentrancy", controllerTests.testSynchronousRecoveryCallbackCannotResurrectContext),
+        ("ignored app invalidates prompt", controllerTests.testChangingIgnoredAppsInvalidatesVisiblePrompt),
         ("recovery next playback", controllerTests.testRecoveryCanPromptAgainOnlyAfterPlaybackStops),
         ("recovery confirmation reset", controllerTests.testRecoveryConfirmationResetsWhenPlaybackStops),
         ("recovery confirmation setting reset", controllerTests.testChangingRecoveryConfirmationRestartsCandidate),

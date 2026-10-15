@@ -34,7 +34,7 @@ public final class GuardController {
     public private(set) var monitorActive = false
     public private(set) var recoveryMonitoringActive = false
     public private(set) var recoveryEndReason: String?
-    public var recoveryPromptID: UUID? { retryPending ? nil : recovery?.id }
+    public var recoveryPromptID: UUID? { retryPending || recovery?.promptInvalidated == true ? nil : recovery?.id }
     public var recoveryContextRetained: Bool { recovery != nil }
     public var recoveryConfirmationActive: Bool { recovery?.candidateSince != nil }
     public private(set) var policy = IdlePolicy()
@@ -58,6 +58,7 @@ public final class GuardController {
         let originalVolume: VolumeSnapshot
         var playbackWasActive = false
         var playbackWasIgnoredOnly = false
+        var promptInvalidated = false
         var candidateSince: TimeInterval?
     }
     private var recovery: RecoveryContext?
@@ -90,6 +91,7 @@ public final class GuardController {
         }
         else if confirmationChanged || ignoredAppsChanged {
             recovery?.candidateSince = nil; recovery?.playbackWasActive = false; recovery?.playbackWasIgnoredOnly = false
+            recovery?.promptInvalidated = ignoredAppsChanged
         }
         if changed {
             record("settings", "设置变更，取消旧重试任务")
@@ -250,7 +252,7 @@ public final class GuardController {
                         if saved.candidateSince == nil { saved.candidateSince = instant }
                         let deadline = saved.candidateSince! + preferences.recoveryPlaybackConfirmation
                         if instant >= deadline {
-                            saved.candidateSince = nil; saved.playbackWasActive = true
+                            saved.candidateSince = nil; saved.playbackWasActive = true; saved.promptInvalidated = false
                             prompt = RecoveryPrompt(id: saved.id, deviceName: current.name,
                                 volume: saved.originalVolume.displayVolume, processes: promptProcesses ?? [],
                                 timeout: preferences.recoveryPromptTimeout)
@@ -293,7 +295,7 @@ public final class GuardController {
     }
     public func restoreVolume(for promptID: UUID, targetPercent: Int? = nil) throws {
         guard running, !sleeping, !retryPending, preferences.enabled, preferences.recoveryPromptEnabled,
-              let saved = recovery, saved.id == promptID else { throw GuardError("恢复请求已失效") }
+              let saved = recovery, !saved.promptInvalidated, saved.id == promptID else { throw GuardError("恢复请求已失效") }
         let snapshot = try saved.originalVolume.restoring(toPercent: targetPercent)
         let current: OutputDevice?
         do { current = try audio.currentDevice() }
