@@ -54,9 +54,13 @@ final class PolicyTests: XCTestCase {
     }
     func testIgnoredRecoveryAppIdentityAndMigration() throws {
         let app = IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", bundlePath: "/Applications/Player.app", name: "Player")
-        var p = Preferences(); p.ignoredRecoveryApps = [app, app]
+        let duplicateIdentity = IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", bundlePath: "/Other/Player.app", name: "Renamed Player")
+        var p = Preferences(); p.ignoredRecoveryApps = [app, duplicateIdentity, app]
         let decoded = Preferences.decode(try JSONEncoder().encode(p))
         XCTAssertEqual(decoded.ignoredRecoveryApps.count, 1)
+        XCTAssertEqual(decoded.ignoredRecoveryApps.first?.name, "Player")
+        let malformed = Data(#"{"ignoredRecoveryApps":[{"bundleIdentifier":null,"bundlePath":"/Applications/Player.app/../Player.app","name":"Path Player"}]}"#.utf8)
+        XCTAssertEqual(Preferences.decode(malformed).ignoredRecoveryApps.first?.bundlePath, "/Applications/Player.app")
         let process = PlaybackProcess(pid: 9, bundleIdentifier: "com.example.Player", bundlePath: "/other/Player.app", name: "Player")
         XCTAssertNil(decoded.recoveryPromptProcesses(from: [process]))
         let legacy = Preferences.decode(Data(#"{"enabled":true,"minutes":5}"#.utf8))

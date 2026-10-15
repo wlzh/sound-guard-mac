@@ -43,7 +43,13 @@ public struct Preferences: Codable, Equatable {
         if !(500...30_000).contains(value.recoveryPlaybackConfirmationMilliseconds) {
             value.recoveryPlaybackConfirmationMilliseconds = 2_000
         }
-        value.ignoredRecoveryApps = Array(Set(value.ignoredRecoveryApps.filter { !$0.name.isEmpty && !$0.identities.isEmpty }))
+        var uniqueApps: [IgnoredRecoveryApp] = []
+        var identities = Set<String>()
+        for app in value.ignoredRecoveryApps where !app.name.isEmpty {
+            guard let identity = app.identity, identities.insert(identity).inserted else { continue }
+            uniqueApps.append(app)
+        }
+        value.ignoredRecoveryApps = uniqueApps
         return value
     }
     private enum CodingKeys: String, CodingKey {
@@ -72,9 +78,20 @@ public struct IgnoredRecoveryApp: Codable, Equatable, Hashable {
     public let name: String
     public init(bundleIdentifier: String? = nil, bundlePath: String? = nil, name: String) {
         self.bundleIdentifier = bundleIdentifier?.isEmpty == true ? nil : bundleIdentifier
-        self.bundlePath = bundlePath?.isEmpty == true ? nil : bundlePath
+        if let bundlePath, !bundlePath.isEmpty {
+            self.bundlePath = URL(fileURLWithPath: bundlePath).standardizedFileURL.path
+        } else {
+            self.bundlePath = nil
+        }
         self.name = name
     }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(bundleIdentifier: try values.decodeIfPresent(String.self, forKey: .bundleIdentifier),
+                  bundlePath: try values.decodeIfPresent(String.self, forKey: .bundlePath),
+                  name: try values.decodeIfPresent(String.self, forKey: .name) ?? "")
+    }
+    private enum CodingKeys: String, CodingKey { case bundleIdentifier, bundlePath, name }
     public var identities: [String] {
         [bundleIdentifier.map { "bundle:\($0)" }, bundlePath.map { "path:\($0)" }].compactMap { $0 }
     }
