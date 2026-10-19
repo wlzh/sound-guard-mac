@@ -49,6 +49,23 @@ enum PlaybackScreenLocator {
                                   name: app.localizedName ?? "未命名 App")
     }
 
+    static func runningApplicationDescriptors() -> [IgnoredRecoveryApp] {
+        var identities = Set<String>()
+        return NSWorkspace.shared.runningApplications.compactMap { app in
+            guard !app.isTerminated, app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+            let path = app.bundleURL?.standardizedFileURL.path
+            guard app.bundleIdentifier != nil || path?.hasSuffix(".app") == true else { return nil }
+            let descriptor = IgnoredRecoveryApp(bundleIdentifier: app.bundleIdentifier, bundlePath: path,
+                                                 name: app.localizedName ?? "未命名 App")
+            guard let identity = descriptor.identity, identities.insert(identity).inserted else { return nil }
+            return descriptor
+        }.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return (lhs.identity ?? "") < (rhs.identity ?? "")
+        }
+    }
+
     private static func owningApplication(for pid: pid_t) -> NSRunningApplication? {
         guard pid > 0, let direct = NSRunningApplication(processIdentifier: pid) else { return nil }
         if direct.activationPolicy == .regular { return direct }

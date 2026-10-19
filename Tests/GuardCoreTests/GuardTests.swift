@@ -74,6 +74,22 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(p.recoveryPromptProcesses(from: [ignored, other]), [other])
         XCTAssertNil(p.recoveryPromptProcesses(from: [ignored]))
     }
+    func testIgnoredRecoveryAppMatchesNestedApplicationBundle() {
+        let outer = IgnoredRecoveryApp(bundleIdentifier: "com.netease.mumu.nemux",
+                                       bundlePath: "/Applications/MuMuPlayer.app", name: "MuMu模拟器")
+        let nested = PlaybackProcess(pid: 2, bundleIdentifier: "com.netease.mumu.nemux.emulator",
+                                     bundlePath: "/Applications/MuMuPlayer.app/Contents/MacOS/MuMuEmulator.app",
+                                     name: "MuMu安卓设备")
+        let sibling = PlaybackProcess(pid: 3, bundleIdentifier: "com.example.Other",
+                                      bundlePath: "/Applications/MuMuPlayer.app.backup/Contents/Other.app",
+                                      name: "Other")
+        let helper = PlaybackProcess(pid: 4, bundleIdentifier: "com.example.Helper",
+                                     bundlePath: "/Applications/MuMuPlayer.app/Contents/MacOS/helper",
+                                     name: "Helper")
+        XCTAssertTrue(outer.matches(nested))
+        XCTAssertFalse(outer.matches(sibling))
+        XCTAssertFalse(outer.matches(helper))
+    }
     func testTimeoutValidation() {
         for (minutes, seconds) in [(1, 60), (120, 7200), (0, 300), (-1, 300), (121, 300)] {
             var p = Preferences(); p.minutes = minutes; XCTAssertEqual(p.timeout, Double(seconds))
@@ -950,6 +966,7 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("defaults", policyTests.testDefaultSettings),
         ("ignored app identity", policyTests.testIgnoredRecoveryAppIdentityAndMigration),
         ("ignored app mixed playback", policyTests.testIgnoredRecoveryAppMixedPlaybackStillPrompts),
+        ("ignored nested app", policyTests.testIgnoredRecoveryAppMatchesNestedApplicationBundle),
         ("timeout bounds", policyTests.testTimeoutValidation),
         ("preferences persistence", policyTests.testPreferencesRoundTrip), ("corrupt preferences", policyTests.testCorruptPreferencesUseDefaults),
         ("legacy preferences migration", policyTests.testLegacyPreferencesMigration), ("recovery timeout bounds", policyTests.testRecoveryTimeoutValidation),

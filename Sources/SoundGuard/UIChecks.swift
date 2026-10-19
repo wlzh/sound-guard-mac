@@ -208,6 +208,7 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.selectedSettingsPage = 2; delegate.rebuildSettings()
     let appViews = descendants(delegate.settings!.contentView!)
     precondition(appViews.compactMap { $0 as? NSButton }.contains { $0.title == "从当前播放进程添加…" })
+    precondition(appViews.compactMap { $0 as? NSButton }.contains { $0.title == "从正在运行的应用添加…" })
     precondition(appViews.compactMap { $0 as? NSButton }.contains { $0.title == "从 Applications 选择…" })
     var appPreferences = delegate.controller.preferences
     appPreferences.ignoredRecoveryApps = [IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player")]

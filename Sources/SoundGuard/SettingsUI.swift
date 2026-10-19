@@ -166,13 +166,15 @@ extension AppDelegate {
         if rows.isEmpty { rows.append(UI.label("尚未添加应用。名单中的应用播放时不会弹出恢复提示。", size: 12, color: .secondaryLabelColor)) }
         let current = NSButton(title: "从当前播放进程添加…", target: self, action: #selector(addCurrentPlaybackApplication))
         current.setAccessibilityLabel("从当前播放进程添加忽略应用")
+        let running = NSButton(title: "从正在运行的应用添加…", target: self, action: #selector(addRunningApplication))
+        running.setAccessibilityLabel("从正在运行的应用添加忽略应用")
         let applications = NSButton(title: "从 Applications 选择…", target: self, action: #selector(addApplications))
         applications.setAccessibilityLabel("从 Applications 选择忽略应用")
         return UI.stack([
             UI.section("恢复提示例外"),
-            UI.label("仅抑制自动归零后的恢复窗口，不阻止应用播放，也不影响自动归零。无法识别的播放来源仍会提示。", size: 12, color: .secondaryLabelColor),
+            UI.label("仅抑制自动归零后的恢复窗口，不阻止应用播放，也不影响自动归零。加入外层 App 时，也包含其包内运行的子 App；无法识别的播放来源仍会提示。", size: 12, color: .secondaryLabelColor),
             UI.group(rows),
-            UI.stack([current, applications], vertical: false, spacing: 10)
+            UI.stack([current, running, applications], spacing: 8)
         ], spacing: 12)
     }
     @objc func removeIgnoredApplication(_ sender: NSButton) {
@@ -189,6 +191,11 @@ extension AppDelegate {
             guard !descriptors.isEmpty else { showError("当前没有可识别的播放 App"); return }
             chooseIgnoredApplications(descriptors)
         } catch { showError("读取当前播放进程失败：" + error.localizedDescription) }
+    }
+    @objc func addRunningApplication() {
+        let descriptors = PlaybackScreenLocator.runningApplicationDescriptors()
+        guard !descriptors.isEmpty else { showError("当前没有可识别的运行中 App"); return }
+        chooseIgnoredApplications(descriptors, title: "选择正在运行的 App")
     }
     @objc func addApplications() {
         let panel = NSOpenPanel()
@@ -208,10 +215,13 @@ extension AppDelegate {
         guard !descriptors.isEmpty else { showError("所选项目不是可识别的 App"); return }
         mergeIgnoredApplications(descriptors)
     }
-    private func chooseIgnoredApplications(_ descriptors: [IgnoredRecoveryApp]) {
-        let alert = NSAlert(); alert.messageText = "选择忽略恢复提示的 App"
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
-        popup.addItems(withTitles: descriptors.map(\.name)); alert.accessoryView = popup
+    private func chooseIgnoredApplications(_ descriptors: [IgnoredRecoveryApp], title: String = "选择忽略恢复提示的 App") {
+        let alert = NSAlert(); alert.messageText = title
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 380, height: 26))
+        popup.addItems(withTitles: descriptors.map { descriptor in
+            let detail = descriptor.bundleIdentifier ?? descriptor.bundlePath ?? "无法显示身份"
+            return "\(descriptor.name) — \(detail)"
+        }); alert.accessoryView = popup
         alert.addButton(withTitle: "添加"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         mergeIgnoredApplications([descriptors[popup.indexOfSelectedItem]])

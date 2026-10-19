@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.4.0"
-    public static let build = "16"
+    public static let current = "0.4.1"
+    public static let build = "17"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -98,10 +98,12 @@ public struct IgnoredRecoveryApp: Codable, Equatable, Hashable {
     public var identity: String? { identities.first }
     public func matches(_ process: PlaybackProcess) -> Bool {
         if let bundleIdentifier, let processIdentifier = process.bundleIdentifier {
-            return bundleIdentifier == processIdentifier
+            if bundleIdentifier == processIdentifier { return true }
         }
-        guard bundleIdentifier == nil, let bundlePath, let processPath = process.bundlePath else { return false }
-        return bundlePath == processPath
+        guard let bundlePath, let processPath = process.bundlePath else { return false }
+        let candidate = URL(fileURLWithPath: processPath).standardizedFileURL.path
+        if bundlePath == candidate { return true }
+        return candidate.hasPrefix(bundlePath + "/Contents/") && candidate.hasSuffix(".app")
     }
 }
 
