@@ -1,12 +1,14 @@
 # 安装与卸载
 
-v0.4.1 / build 17，开发预览；macOS 14.2+，Universal arm64/x86_64。实机范围见测试报告，其他平台及设备仍需验证。
+v0.4.2 / build 18，开发预览；macOS 14.2+，Universal arm64/x86_64。实机范围见测试报告，其他平台及设备仍需验证。
 
 ## 安装
 
-若 [公开 Release](https://github.com/wlzh/sound-guard-mac/releases) 已发布此版本，下载 `SoundGuard-v0.4.1-macos-universal.zip` 和 SHA256.txt，在同一目录执行 `shasum -a 256 -c SHA256.txt`。若尚未发布附件，可运行 `zsh scripts/package-release.sh` 本地构建。解压后把 Sound Guard.app 放入 `/Applications` 或 `~/Applications` 再打开。
+若 [公开 Release](https://github.com/wlzh/sound-guard-mac/releases) 已发布此版本，下载 `SoundGuard-v0.4.2-macos-universal.zip` 和 SHA256.txt，在同一目录执行 `shasum -a 256 -c SHA256.txt`。若尚未发布附件，可运行 `zsh scripts/package-release.sh` 本地构建。脚本同时保留版本专用 `.zip.sha256` 校验文件；同版本归档已存在时在构建前拒绝覆盖，先保管旧归档再决定是否重建。解压后把 Sound Guard.app 放入 `/Applications` 或 `~/Applications` 再打开。
 
 当前 ad-hoc 签名，没有 Apple Developer ID 和公证。若 macOS 拦截，在确认来源和校验和后按系统“隐私与安全性”提供的允许打开流程操作；不建议全局关闭 Gatekeeper。升级前退出旧实例，再替换 App，不同时运行两份。
+
+构建和打包不会自动替换 `/Applications` 中正在运行的 App。升级退出会丢失仅在内存中的恢复记录，因此不把生成发行包等同于安装或实机验收。
 
 源码构建：在项目根运行 `zsh scripts/test-all.sh` 和 `zsh scripts/build-app.sh`，产物位于 `dist/Sound Guard.app`。默认模式无需录音权限；严格模式在非零音量启用后才会访问系统音频。恢复提醒关闭时不请求辅助功能；开启时系统会提示授权，拒绝后仍可运行并回退到鼠标所在屏幕。
 

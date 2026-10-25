@@ -4,7 +4,7 @@ root = Pathname.new(__dir__).parent
 version = (root / 'VERSION').read.strip
 build = (root / 'BUILD_NUMBER').read.strip
 abort 'Invalid version' unless version.match?(/\A\d+\.\d+\.\d+\z/) && build.match?(/\A[1-9]\d*\z/)
-files = %w[README.md LICENSE CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/README.md docs/INSTALL.md docs/USER_GUIDE.md docs/ABOUT.md docs/TESTING.md docs/PERFORMANCE.md docs/prd/README.md]
+files = %w[README.md LICENSE CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/README.md docs/INSTALL.md docs/USER_GUIDE.md docs/ABOUT.md docs/TESTING.md docs/PERFORMANCE.md docs/prd/README.md docs/AUDIT.md]
 files += %w[prd design dev plan].map { |name| "docs/prd/v#{version}/#{name}.md" }
 files << "docs/releases/v#{version}.md"
 files.each { |file| abort "Missing #{file}" unless (root / file).file? && (root / file).size > 0 }
@@ -19,7 +19,13 @@ abort 'Install archive mismatch' unless (root / 'docs/INSTALL.md').read.include?
 %w[prd design dev plan].each do |name|
   abort "Wrong heading #{name}" unless (root / "docs/prd/v#{version}/#{name}.md").read.lines.first.include?("v#{version}")
 end
-abort 'Missing acceptance criteria' unless (root / "docs/prd/v#{version}/prd.md").read.scan(/^- \[[ x]\] A\d\d /).length == 34
+criteria = (root / "docs/prd/v#{version}/prd.md").read.scan(/^- \[[ x]\] (A\d\d) /).flatten
+abort 'Invalid acceptance criteria' unless criteria == (1..34).map { |i| format('A%02d', i) }
+%w[README.md docs/README.md docs/INSTALL.md docs/ABOUT.md docs/prd/README.md docs/AUDIT.md].each do |file|
+  abort "Current version mismatch #{file}" unless (root / file).read.include?("v#{version} / build #{build}")
+end
+report = (root / 'docs/TESTING.md').read
+abort 'Test report version mismatch' unless report.include?("版本：#{version}，build #{build}")
 markdown = Dir.glob("#{root}/{*.md,docs/**/*.md}")
 markdown.each do |file|
   File.read(file).scan(/\[[^\]]*\]\(([^)]+)\)/).flatten.each do |link|
@@ -30,9 +36,9 @@ markdown.each do |file|
 end
 tests = (root / 'Tests/GuardCoreTests/GuardTests.swift').read
 count = tests.scan(/func test\w+\(/).length
-abort 'Test report count mismatch' unless (root / 'docs/TESTING.md').read.include?("当前 #{count} 项回归")
+abort 'Test report count mismatch' unless report.include?("当前 #{count} 项回归")
 tests.scan(/func (test\w+)\(/).flatten.each do |name|
-  abort "Unregistered test #{name}" unless tests.match?(/Tests\.#{name}\b/)
+  abort "Missing or duplicate test registration #{name}" unless tests.scan(/Tests\.#{name}\b/).length == 1
 end
 abort 'MIT missing' unless (root / 'LICENSE').read.start_with?('MIT License')
 puts "DOCS_CHECK=PASS; VERSION=#{version}; BUILD=#{build}; MARKDOWN=#{markdown.length}; ACCEPTANCE=34"

@@ -68,6 +68,7 @@ public final class GuardController {
     }
     public func start() {
         guard !running else { return }
+        detectionFault = nil; automaticRetryCount = 0; healthySince = nil; awaitingHealthy = false
         running = true
         audio.onChange = { [weak self] in self?.refresh() }
         do { try audio.start(); refresh() } catch { fail(error) }
@@ -176,6 +177,11 @@ public final class GuardController {
                 let previousVolume: VolumeSnapshot
                 phase = "zero"
                 do { previousVolume = try audio.zero(device) }
+                catch let AudioOperationFailure.cancelled(message) {
+                    record("zeroCancelled", message)
+                    policy.reset(); refresh(); return
+                }
+                catch let AudioOperationFailure.preflight(error) { throw error }
                 catch { writeFault = error.localizedDescription; throw error }
                 lastAction = "已自动归零 · " + DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
                 record("autoZero", "自动归零成功")
@@ -243,6 +249,7 @@ public final class GuardController {
                     if promptProcesses == nil {
                         saved.candidateSince = nil; saved.playbackWasActive = true; saved.playbackWasIgnoredOnly = true
                         recovery = saved
+                        markHealthy()
                         onUpdate?()
                         return
                     }
@@ -281,17 +288,26 @@ public final class GuardController {
         } catch { fail(error) }
     }
     public func zeroNow() {
-        guard running, !sleeping else { return }
+        guard running, !sleeping, !retryPending else { return }
         do {
+            phase = "manualZeroRead"
             guard let current = try audio.currentDevice(), preferences.includes(current), current.controllable else {
-                throw GuardError("当前设备不在保护名单或不支持音量控制")
+                record("zeroCancelled", "当前设备不在保护名单或不支持音量控制")
+                refresh(); return
             }
             // Manual action may run during playback; temporarily stop detection, not audio output.
+            phase = "manualZeroMonitor"
             try audio.setMonitoring(device: nil, signal: false)
             recovery = nil; recoveryMonitoringActive = false
-            _ = try audio.zero(current)
+            phase = "manualZero"
+            do { _ = try audio.zero(current) }
+            catch let AudioOperationFailure.preflight(error) { throw error }
+            catch let AudioOperationFailure.cancelled(message) {
+                record("zeroCancelled", message); policy.reset(); refresh(); return
+            }
+            catch { writeFault = error.localizedDescription; throw error }
             lastAction = "已手动归零"; policy.reset(); writeFault = nil; refresh()
-        } catch { writeFault = error.localizedDescription; fail(error) }
+        } catch { fail(error) }
     }
     public func restoreVolume(for promptID: UUID, targetPercent: Int? = nil) throws {
         guard running, !sleeping, !retryPending, preferences.enabled, preferences.recoveryPromptEnabled,
@@ -303,8 +319,15 @@ public final class GuardController {
         guard let current, current.id == saved.zeroDevice.id,
               current.selectionID == saved.zeroDevice.selectionID, current.volume == 0,
               current.muted == saved.zeroDevice.muted, current.controllable,
-              preferences.includes(current) else { recovery = nil; throw GuardError("设备或音量已变化，未恢复音量") }
+              preferences.includes(current) else {
+            recovery = nil; recoveryEndReason = "设备或音量已变化，未恢复音量"
+            refresh(); throw GuardError("设备或音量已变化，未恢复音量")
+        }
         do { try audio.restore(current, snapshot: snapshot) }
+        catch let AudioOperationFailure.cancelled(message) {
+            recovery = nil; recoveryEndReason = message; refresh(); throw GuardError(message)
+        }
+        catch let AudioOperationFailure.preflight(error) { phase = "restoreRead"; fail(error); throw error }
         catch { phase = "restoreWrite"; writeFault = error.localizedDescription; fail(error); throw error }
         recovery = nil; recoveryMonitoringActive = false
         recoveryEndReason = "已确认恢复音量"
@@ -344,6 +367,7 @@ public final class GuardController {
     }
     private func fail(_ error: Error) {
         recordFault(error)
+        if let healthySince, now() - healthySince >= 60 { automaticRetryCount = 0 }
         healthySince = nil
         if writeFault == nil, (error as? GuardError)?.retryable == true,
            running, !sleeping, preferences.enabled, automaticRetryCount < Self.automaticDelays.count {
@@ -381,4 +405,16 @@ public struct GuardError: LocalizedError {
     public let retryable: Bool
     public init(_ message: String, retryable: Bool = false) { self.message = message; self.retryable = retryable }
     public var errorDescription: String? { message }
+}
+
+/// Only failures before the first volume write may bypass the write-fault latch.
+public enum AudioOperationFailure: LocalizedError {
+    case cancelled(String)
+    case preflight(Error)
+    public var errorDescription: String? {
+        switch self {
+        case .cancelled(let message): return message
+        case .preflight(let error): return error.localizedDescription
+        }
+    }
 }

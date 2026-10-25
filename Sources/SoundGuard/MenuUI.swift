@@ -19,7 +19,8 @@ extension AppDelegate {
         menu.addItem(header); menu.addItem(.separator())
         item("自动保护", #selector(toggleEnabled), in: menu).state = controller.preferences.enabled ? .on : .off
         let zero = item("立即归零", #selector(zeroNow), in: menu)
-        zero.isEnabled = device.map { controller.preferences.includes($0) && $0.controllable && $0.volume > 0 } ?? false
+        zero.isEnabled = displayState != .retrying && displayState != .sleeping &&
+            (device.map { controller.preferences.includes($0) && $0.controllable && $0.volume > 0 } ?? false)
         let delay = NSMenuItem(title: "空闲时长：\(controller.preferences.minutes) 分钟", action: nil, keyEquivalent: "")
         let options = NSMenu(); options.autoenablesItems = false
         for minutes in [1, 3, 5, 10, 15, 30, 60, 120] {

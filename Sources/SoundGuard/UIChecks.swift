@@ -35,6 +35,7 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.previewState = .retrying
     let retryingMenu = NSMenu(); delegate.menuWillOpen(retryingMenu)
     precondition(retryingMenu.items.contains { $0.title == "重新核对" && !$0.isEnabled })
+    precondition(retryingMenu.items.contains { $0.title == "立即归零" && !$0.isEnabled })
     delegate.menuDidClose(retryingMenu); delegate.previewState = .zero
     func render(_ view: NSView?, name: String) throws {
         guard let directory = outputDirectory, let view else { return }

@@ -89,6 +89,8 @@ final class PolicyTests: XCTestCase {
         XCTAssertTrue(outer.matches(nested))
         XCTAssertFalse(outer.matches(sibling))
         XCTAssertFalse(outer.matches(helper))
+        let folder = IgnoredRecoveryApp(bundlePath: "/Applications", name: "Not an app")
+        XCTAssertFalse(folder.matches(PlaybackProcess(pid: 5, bundlePath: "/Applications/Contents/Other.app")))
     }
     func testTimeoutValidation() {
         for (minutes, seconds) in [(1, 60), (120, 7200), (0, 300), (-1, 300), (121, 300)] {
@@ -273,6 +275,8 @@ private final class FakeAudio: AudioService {
     var failRead = false, failMonitor = false, failZeroMonitor = false, failWrite = false, failStart = false, failPlayback = false
     var starts = 0, stops = 0
     var transient = false, failRestore = false, failPostZeroRead = false
+    var zeroFailure: Error?, restoreFailure: Error?
+    var beforeZero: (() -> Void)?
     func start() throws { starts += 1; if failStart { throw GuardError("start", retryable: transient) } }
     func stop() { stops += 1; monitored = nil }
     func currentDevice() throws -> OutputDevice? {
@@ -289,6 +293,8 @@ private final class FakeAudio: AudioService {
     }
     func playingProcesses(for device: OutputDevice) throws -> [PlaybackProcess] { sources }
     func zero(_ expected: OutputDevice) throws -> VolumeSnapshot {
+        beforeZero?()
+        if let zeroFailure { throw zeroFailure }
         if failWrite { throw GuardError("write", retryable: transient) }
         guard device == expected else { throw GuardError("changed") }
         writes += 1; device = speaker(0, id: expected.id, uid: expected.uid, route: expected.route, builtIn: expected.builtInSpeaker)
@@ -296,6 +302,7 @@ private final class FakeAudio: AudioService {
         return VolumeSnapshot(values: [expected.volume])
     }
     func restore(_ expectedZero: OutputDevice, snapshot: VolumeSnapshot) throws {
+        if let restoreFailure { throw restoreFailure }
         if failRestore { throw GuardError("restore write", retryable: transient) }
         let volume = snapshot.displayVolume
         guard device == expectedZero, volume > 0, volume <= 1 else { throw GuardError("restore changed") }
@@ -343,6 +350,91 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(audio.writes, 0); XCTAssertEqual(audio.restoreWrites, 0)
         audio.failStart = false; controller.retry(); time = 46; scheduler.action?()
         XCTAssertEqual(controller.state, .waiting(346)); XCTAssertEqual(controller.automaticRetryCount, 0)
+    }
+    func testZeroCancellationReconcilesWithoutFaultLatch() {
+        for changed in [speaker(0.2), speaker(id: 2)] {
+            tearDown(); setUp(); controller.start()
+            audio.beforeZero = { [unowned self] in self.audio.device = changed }
+            audio.zeroFailure = AudioOperationFailure.cancelled("changed before write")
+            time = 300; scheduler.action?()
+            XCTAssertEqual(controller.state, .waiting(600)); XCTAssertEqual(audio.writes, 0)
+            XCTAssertNil(controller.lastFault); XCTAssertEqual(controller.automaticRetryCount, 0)
+            audio.beforeZero = nil; audio.zeroFailure = nil
+            time = 600; scheduler.action?(); XCTAssertEqual(audio.writes, 1)
+        }
+        tearDown(); setUp(); controller.start()
+        audio.beforeZero = { [unowned self] in self.audio.activity = .playing }
+        audio.zeroFailure = AudioOperationFailure.cancelled("playback resumed")
+        time = 300; scheduler.action?()
+        XCTAssertEqual(controller.state, .playing); XCTAssertNil(scheduler.action); XCTAssertNil(controller.lastFault)
+    }
+    func testZeroPreflightReadCanRetryWithoutWriteLatch() {
+        controller.start()
+        audio.zeroFailure = AudioOperationFailure.preflight(GuardError("preflight read", retryable: true))
+        time = 300; scheduler.action?()
+        XCTAssertTrue(controller.automaticRetryPending); XCTAssertEqual(audio.writes, 0)
+        audio.zeroFailure = nil; time = 303; scheduler.action?()
+        XCTAssertEqual(controller.state, .waiting(603))
+        time = 603; scheduler.action?(); XCTAssertEqual(audio.writes, 1)
+    }
+    func testManualZeroReadFailureRetriesAndExcludedDoesNotLatch() {
+        controller.start(); audio.failRead = true; audio.transient = true; controller.zeroNow()
+        XCTAssertTrue(controller.automaticRetryPending); XCTAssertEqual(audio.writes, 0)
+        audio.failRead = false; time = 3; scheduler.action?()
+        XCTAssertEqual(controller.state, .waiting(303))
+        audio.device = speaker(builtIn: false); controller.zeroNow()
+        XCTAssertEqual(controller.state, .excluded)
+        audio.device = speaker(); audio.onChange?(); XCTAssertEqual(controller.state, .waiting(303))
+    }
+    func testManualZeroCannotInterruptRetryCooldown() {
+        controller.start(); controller.retry(); let stale = scheduler.action
+        controller.zeroNow(); XCTAssertEqual(audio.writes, 0)
+        XCTAssertEqual(controller.state, .retrying)
+        time = 3; stale?(); XCTAssertEqual(controller.state, .waiting(303))
+    }
+    func testRestoreChangedWithoutNotificationReleasesMonitor() {
+        armRecovery(); let id = controller.recoveryPromptID!
+        audio.device = speaker(0, id: 2)
+        do { try controller.restoreVolume(for: id); XCTAssertTrue(false) } catch {}
+        XCTAssertFalse(controller.recoveryContextRetained); XCTAssertFalse(controller.recoveryMonitoringActive)
+        XCTAssertNil(audio.monitored); XCTAssertEqual(audio.restoreWrites, 0)
+    }
+    func testRestoreAdapterCancellationDoesNotLatch() {
+        armRecovery(); let id = controller.recoveryPromptID!
+        audio.restoreFailure = AudioOperationFailure.cancelled("route changed before write")
+        do { try controller.restoreVolume(for: id); XCTAssertTrue(false) } catch {}
+        XCTAssertFalse(controller.recoveryContextRetained); XCTAssertNil(audio.monitored)
+        XCTAssertNil(controller.lastFault); XCTAssertEqual(audio.restoreWrites, 0)
+        audio.device = speaker(); audio.onChange?(); XCTAssertEqual(controller.state, .waiting(600))
+    }
+    func testRestorePreflightTransientPreservesContext() throws {
+        armRecovery(); let id = controller.recoveryPromptID!
+        audio.restoreFailure = AudioOperationFailure.preflight(GuardError("read", retryable: true))
+        do { try controller.restoreVolume(for: id); XCTAssertTrue(false) } catch {}
+        XCTAssertTrue(controller.automaticRetryPending); XCTAssertTrue(controller.recoveryContextRetained)
+        audio.restoreFailure = nil; time = 303; scheduler.action?()
+        try controller.restoreVolume(for: id); XCTAssertEqual(audio.restoreWrites, 1)
+    }
+    func testQuietHealthyPeriodResetsBudgetBeforeNextFault() {
+        controller.start(); audio.transient = true; audio.failRead = true; audio.onChange?()
+        audio.failRead = false; time = 3; scheduler.action?()
+        time = 64; audio.failRead = true; audio.onChange?()
+        XCTAssertEqual(controller.automaticRetryCount, 1); XCTAssertEqual(scheduler.deadline, 67)
+    }
+    func testIgnoredPlaybackCountsAsHealthyRecovery() {
+        var p = Preferences(); p.recoveryPromptEnabled = true
+        p.ignoredRecoveryApps = [IgnoredRecoveryApp(bundleIdentifier: "example.ignored", name: "Ignored")]
+        controller.configure(p); controller.start(); time = 300; scheduler.action?()
+        audio.transient = true; audio.failRead = true; audio.onChange?()
+        audio.failRead = false; audio.sources = [PlaybackProcess(pid: 1, bundleIdentifier: "example.ignored")]
+        time = 303; scheduler.action?(); time = 364; audio.onChange?()
+        XCTAssertEqual(controller.automaticRetryCount, 0); XCTAssertTrue(controller.recoveryContextRetained)
+    }
+    func testStopStartClearsDetectionFaultButNotWriteFault() {
+        audio.failRead = true; controller.start(); controller.stop()
+        audio.failRead = false; controller.start(); XCTAssertEqual(controller.state, .waiting(300))
+        audio.failWrite = true; time = 300; scheduler.action?(); controller.stop(); controller.start()
+        XCTAssertEqual(controller.state, .fault("write")); XCTAssertEqual(audio.writes, 0)
     }
     func testTransientRetryHealthBudgetAndFullIdlePeriod() {
         controller.start(); audio.transient = true; audio.failRead = true; audio.onChange?()
@@ -951,6 +1043,15 @@ final class MeterTests: XCTestCase {
         let samples: [Float] = [.nan]; samples.withUnsafeBufferPointer { sg_consume(meter, $0.baseAddress, $0.count, 300) }
         XCTAssertEqual(sg_invalid(meter), 1)
     }
+    func testInvalidSampleAfterSoundIsNotSkipped() {
+        for invalid: Float in [.nan, .infinity, -.infinity] {
+            let meter = sg_create()!
+            let samples: [Float] = [0.1, 0, invalid]
+            samples.withUnsafeBufferPointer { sg_consume(meter, $0.baseAddress, $0.count, 300) }
+            XCTAssertEqual(sg_invalid(meter), 1); XCTAssertEqual(sg_last_buffer(meter), 300)
+            sg_destroy(meter)
+        }
+    }
     func testMissingBufferIsNotSilenceEvidence() {
         let meter = sg_create()!; defer { sg_destroy(meter) }
         sg_consume(meter, nil, 0, 300); XCTAssertEqual(sg_last_buffer(meter), 0)
@@ -985,6 +1086,16 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("invalid volume", policyTests.testInvalidVolumeCannotTrigger)
     ]),
     (controllerTests, [
+        ("zero cancellation reconciliation", controllerTests.testZeroCancellationReconcilesWithoutFaultLatch),
+        ("zero preflight read retry", controllerTests.testZeroPreflightReadCanRetryWithoutWriteLatch),
+        ("manual zero read and exclusion", controllerTests.testManualZeroReadFailureRetriesAndExcludedDoesNotLatch),
+        ("manual zero cooldown", controllerTests.testManualZeroCannotInterruptRetryCooldown),
+        ("restore changed cleanup", controllerTests.testRestoreChangedWithoutNotificationReleasesMonitor),
+        ("restore adapter cancellation", controllerTests.testRestoreAdapterCancellationDoesNotLatch),
+        ("restore preflight retry", controllerTests.testRestorePreflightTransientPreservesContext),
+        ("quiet healthy retry budget", controllerTests.testQuietHealthyPeriodResetsBudgetBeforeNextFault),
+        ("ignored recovery healthy budget", controllerTests.testIgnoredPlaybackCountsAsHealthyRecovery),
+        ("controller restart fault lifecycle", controllerTests.testStopStartClearsDetectionFaultButNotWriteFault),
         ("automatic retry backoff", controllerTests.testTransientRetryBackoffAndExhaustion),
         ("automatic retry healthy budget", controllerTests.testTransientRetryHealthBudgetAndFullIdlePeriod),
         ("automatic retry recovery dedup", controllerTests.testTransientRetryPreservesRecoveryAndDeduplicatesPlayback),
@@ -1048,7 +1159,9 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
                   ("signal delayed poll", meterTests.testSignalShortSoundRetainedAcrossDelayedPoll), ("signal corrupt", meterTests.testSignalInvalidClockAndSamplesFail),
                   ("signal pause debounce", meterTests.testSignalPauseUsesSixHundredMillisecondDebounce),
                   ("digital silence", meterTests.testDigitalSilence), ("quiet sound", meterTests.testQuietSoundIsNotSilence),
-                  ("invalid samples", meterTests.testInvalidSamples), ("missing callback", meterTests.testMissingBufferIsNotSilenceEvidence)])
+                  ("invalid samples", meterTests.testInvalidSamples),
+                  ("invalid samples after sound", meterTests.testInvalidSampleAfterSoundIsNotSkipped),
+                  ("missing callback", meterTests.testMissingBufferIsNotSilenceEvidence)])
 ]
 var count = 0
 for (suite, tests) in suites {

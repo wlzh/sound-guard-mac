@@ -1,9 +1,11 @@
 # 文档索引
 
-项目阶段：v0.4.1 / build 17 开发预览，恢复提示例外支持运行中应用与包内嵌套 App。实机验收状态单独记录。
+项目阶段：v0.4.2 / build 18 开发预览，归零取消、恢复清理、重试预算与信号校验修复。实机验收状态单独记录。
 
 | 文档 | 状态 |
 | --- | --- |
+| [v0.4.2 PRD](prd/v0.4.2/prd.md) | 全链路可靠性修复；[设计](prd/v0.4.2/design.md)、[技术](prd/v0.4.2/dev.md)、[计划](prd/v0.4.2/plan.md) |
+| [审计记录](AUDIT.md) | 代码、上下游、修复、验证与未验收边界 |
 | [v0.4.1 PRD](prd/v0.4.1/prd.md) | 运行中应用及嵌套 App 例外；[设计](prd/v0.4.1/design.md)、[技术](prd/v0.4.1/dev.md)、[计划](prd/v0.4.1/plan.md) |
 | [v0.4.0 PRD](prd/v0.4.0/prd.md) | 恢复提示应用例外；[设计](prd/v0.4.0/design.md)、[技术](prd/v0.4.0/dev.md)、[计划](prd/v0.4.0/plan.md) |
 | [v0.3.8 PRD](prd/v0.3.8/prd.md) | 恢复音量选择与测试偏好隔离 |
@@ -21,6 +23,6 @@
 | [实施计划](prd/v0.3.0/plan.md) | 区分自动化完成与实机待验收 |
 | [测试与发布门禁](TESTING.md) | 自动化与实机分开记录 |
 | [安装](INSTALL.md)、[用户指南](USER_GUIDE.md)、[关于](ABOUT.md) | 已编写 |
-| [性能](PERFORMANCE.md)、[发行说明](releases/v0.4.1.md) | 不宣称未测指标通过 |
+| [性能](PERFORMANCE.md)、[发行说明](releases/v0.4.2.md) | 不宣称未测指标通过 |
 
 参考本机 watermark-flow-mac 和 window-layout-memory 的原生 App、关于窗口、版本文件与统一测试门禁组织方式。未复制其业务代码，也未继承其版本或测试结论。

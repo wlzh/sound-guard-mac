@@ -9,7 +9,5 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Tests, build and documentation
-        run: zsh scripts/test-all.sh
-      - name: Universal app and signature
-        run: zsh scripts/build-app.sh
+      - name: Tests, documentation, Universal app, signature and archive
+        run: zsh scripts/package-release.sh

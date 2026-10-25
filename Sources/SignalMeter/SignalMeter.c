@@ -8,11 +8,13 @@ SGMeter *sg_create(void) { return calloc(1, sizeof(SGMeter)); }
 void sg_destroy(SGMeter *m) { free(m); }
 void sg_consume(SGMeter *m, const float *samples, size_t count, uint64_t now) {
     if (!samples || !count) return;
+    int audible = 0;
     for (size_t i = 0; i < count; i++) {
         if (!isfinite(samples[i])) { atomic_store(&m->invalid, 1); break; }
         // Exact digital silence: even very quiet finite audio keeps the output open.
-        if (samples[i] != 0.0f) { atomic_store(&m->sound, now); break; }
+        if (samples[i] != 0.0f) audible = 1;
     }
+    if (audible) atomic_store(&m->sound, now);
     atomic_store(&m->buffer, now);
 }
 uint64_t sg_last_buffer(SGMeter *m) { return atomic_load(&m->buffer); }

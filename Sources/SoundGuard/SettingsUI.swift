@@ -216,7 +216,7 @@ extension AppDelegate {
         mergeIgnoredApplications(descriptors)
     }
     private func chooseIgnoredApplications(_ descriptors: [IgnoredRecoveryApp], title: String = "选择忽略恢复提示的 App") {
-        let alert = NSAlert(); alert.messageText = title
+        let alert = UI.alert(message: title)
         let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 380, height: 26))
         popup.addItems(withTitles: descriptors.map { descriptor in
             let detail = descriptor.bundleIdentifier ?? descriptor.bundlePath ?? "无法显示身份"

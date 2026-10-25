@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.4.1"
-    public static let build = "17"
+    public static let current = "0.4.2"
+    public static let build = "18"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -103,7 +103,7 @@ public struct IgnoredRecoveryApp: Codable, Equatable, Hashable {
         guard let bundlePath, let processPath = process.bundlePath else { return false }
         let candidate = URL(fileURLWithPath: processPath).standardizedFileURL.path
         if bundlePath == candidate { return true }
-        return candidate.hasPrefix(bundlePath + "/Contents/") && candidate.hasSuffix(".app")
+        return bundlePath.hasSuffix(".app") && candidate.hasPrefix(bundlePath + "/Contents/") && candidate.hasSuffix(".app")
     }
 }
 
