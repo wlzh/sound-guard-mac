@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.4.3"
-    public static let build = "19"
+    public static let current = "0.4.4"
+    public static let build = "20"
 }
 
 public struct Preferences: Codable, Equatable {
@@ -15,6 +15,8 @@ public struct Preferences: Codable, Equatable {
     public var recoveryPromptSeconds = 60
     public var recoveryPlaybackConfirmationMilliseconds = 2_000
     public var ignoredRecoveryApps: [IgnoredRecoveryApp] = []
+    /// Suggested restore level for zero-watch prompts whose original volume was never observed.
+    public static let implicitWatchRestoreVolume: Float = 0.25
     public init() {}
     public var ignoredRecoveryAppIdentities: Set<String> {
         Set(ignoredRecoveryApps.flatMap { $0.identities })
@@ -158,9 +160,12 @@ public struct RecoveryPrompt: Equatable {
     public let volume: Float
     public let processes: [PlaybackProcess]
     public let timeout: TimeInterval
-    public init(id: UUID, deviceName: String, volume: Float, processes: [PlaybackProcess], timeout: TimeInterval) {
+    /// False when the suggested volume is a default rather than the remembered pre-zero level.
+    public let originalVolumeKnown: Bool
+    public init(id: UUID, deviceName: String, volume: Float, processes: [PlaybackProcess], timeout: TimeInterval,
+                originalVolumeKnown: Bool = true) {
         self.id = id; self.deviceName = deviceName; self.volume = volume
-        self.processes = processes; self.timeout = timeout
+        self.processes = processes; self.timeout = timeout; self.originalVolumeKnown = originalVolumeKnown
     }
 }
 public enum GuardState: Equatable {

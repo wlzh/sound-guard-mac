@@ -10,6 +10,7 @@ public protocol AudioService: AnyObject {
     func setMonitoring(device: OutputDevice?, signal: Bool) throws
     func playback(for device: OutputDevice, signal: Bool) throws -> Playback
     func playingProcesses(for device: OutputDevice) throws -> [PlaybackProcess]
+    func volumeSnapshot(for device: OutputDevice) throws -> VolumeSnapshot
     func zero(_ expected: OutputDevice) throws -> VolumeSnapshot
     func restore(_ expectedZero: OutputDevice, snapshot: VolumeSnapshot) throws
 }
@@ -41,6 +42,10 @@ public final class GuardController {
     public var recoveryPromptID: UUID? { retryPending || recovery?.promptInvalidated == true ? nil : recovery?.id }
     public var recoveryContextRetained: Bool { recovery != nil }
     public var recoveryConfirmationActive: Bool { recovery?.candidateSince != nil }
+    /// True when the retained context was armed by zero-watch rather than by our own auto-zero write.
+    public var recoveryImplicit: Bool { recovery?.implicit == true }
+    /// True after an explicit keep-silent or manual zero decision, until that device leaves volume zero.
+    public var zeroWatchSuppressed: Bool { silencedZeroKey != nil }
     public private(set) var policy = IdlePolicy()
     private let audio: AudioService
     private let scheduler: GuardScheduler
@@ -66,12 +71,20 @@ public final class GuardController {
         let id: UUID
         let zeroDevice: OutputDevice
         let originalVolume: VolumeSnapshot
+        let implicit: Bool
+        let volumeKnown: Bool
         var playbackWasActive = false
         var playbackWasIgnoredOnly = false
         var promptInvalidated = false
         var candidateSince: TimeInterval?
     }
     private var recovery: RecoveryContext?
+    /// Last observed non-zero channel snapshot per device UID, reused by zero-watch prompts.
+    private var lastNonZeroSnapshots: [String: VolumeSnapshot] = [:]
+    /// Device whose zero state the user explicitly silenced; zero-watch stays off for it at volume 0.
+    private var silencedZeroKey: String?
+    /// Deduplicates implicitWatch diagnostics while a persistent monitoring failure keeps re-arming.
+    private var implicitWatchLogged = false
     public init(audio: AudioService, scheduler: GuardScheduler, preferences: Preferences = .init(),
                 now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.audio = audio; self.scheduler = scheduler; self.preferences = preferences; self.now = now
@@ -90,6 +103,7 @@ public final class GuardController {
         running = false; retryPending = false; invalidate(); audio.onChange = nil; audio.stop(); monitorActive = false
         recoveryMonitoringActive = false; recovery = nil; retryDeadline = nil; automaticRetryPending = false
         stopHeartbeat(); sustainedFaultMessage = nil; sustainedFaultCycles = 0
+        silencedZeroKey = nil; lastNonZeroSnapshots.removeAll(); implicitWatchLogged = false
     }
     deinit { stopHeartbeat() }
     public func configure(_ value: Preferences) {
@@ -167,6 +181,8 @@ public final class GuardController {
                 }
                 if recovery == nil { record("recoveryInvalidated", recoveryEndReason ?? "恢复记录已失效") }
             }
+            maintainZeroWatch()
+            armImplicitRecovery()
             let recovering = !active && recovery != nil && device?.volume == 0
             phase = "monitor"
             do {
@@ -205,7 +221,8 @@ public final class GuardController {
                     let expectedZero = OutputDevice(id: device.id, uid: device.uid, name: device.name,
                         route: device.route, builtInSpeaker: device.builtInSpeaker, volume: 0,
                         muted: device.muted, controllable: device.controllable)
-                    recovery = RecoveryContext(id: UUID(), zeroDevice: expectedZero, originalVolume: previousVolume)
+                    recovery = RecoveryContext(id: UUID(), zeroDevice: expectedZero, originalVolume: previousVolume,
+                                               implicit: false, volumeKnown: true)
                 }
                 phase = "postZeroRead"
                 self.device = try audio.currentDevice()
@@ -276,7 +293,8 @@ public final class GuardController {
                             saved.candidateSince = nil; saved.playbackWasActive = true; saved.promptInvalidated = false
                             prompt = RecoveryPrompt(id: saved.id, deviceName: current.name,
                                 volume: saved.originalVolume.displayVolume, processes: promptProcesses ?? [],
-                                timeout: preferences.recoveryPromptTimeout)
+                                timeout: preferences.recoveryPromptTimeout,
+                                originalVolumeKnown: saved.volumeKnown)
                         } else {
                             let token = generation
                             scheduler.schedule(at: deadline) { [weak self] in
@@ -320,7 +338,9 @@ public final class GuardController {
                 record("zeroCancelled", message); policy.reset(); refresh(); return
             }
             catch { writeFault = error.localizedDescription; throw error }
-            lastAction = "已手动归零"; policy.reset(); writeFault = nil; refresh()
+            lastAction = "已手动归零"; policy.reset(); writeFault = nil
+            silencedZeroKey = current.selectionID
+            refresh()
         } catch { fail(error) }
     }
     public func restoreVolume(for promptID: UUID, targetPercent: Int? = nil) throws {
@@ -350,6 +370,7 @@ public final class GuardController {
     }
     public func keepSilent(for promptID: UUID) {
         guard running, let saved = recovery, saved.id == promptID else { return }
+        silencedZeroKey = saved.zeroDevice.selectionID
         recovery = nil; recoveryMonitoringActive = false
         recoveryEndReason = "已确认保持静音"
         try? audio.setMonitoring(device: nil, signal: false)
@@ -357,6 +378,38 @@ public final class GuardController {
         policy.reset(); refresh()
     }
     private func invalidate() { generation += 1; scheduler.cancel() }
+    // MARK: - Zero watch
+    /// A protected device sitting at volume zero is watched even without our own auto-zero
+    /// credential, so a lost recovery context (route flip, restart, wake, fault) can never leave
+    /// protection silently dormant. Explicit keep-silent and manual-zero decisions suppress the
+    /// watch for that device until it leaves zero; remembered non-zero snapshots keep restore
+    /// amounts honest across implicit re-arms.
+    private func maintainZeroWatch() {
+        if let key = silencedZeroKey, let current = device,
+           current.selectionID != key || current.volume > 0 || current.muted { silencedZeroKey = nil }
+        if device?.volume != 0 { implicitWatchLogged = false }
+        guard let current = device, current.volume > 0, current.controllable,
+              let snapshot = try? audio.volumeSnapshot(for: current), snapshot.displayVolume > 0 else { return }
+        lastNonZeroSnapshots[current.uid] = snapshot
+    }
+    private func armImplicitRecovery() {
+        guard recovery == nil, preferences.enabled, preferences.recoveryPromptEnabled,
+              let current = device, preferences.includes(current), current.controllable,
+              !current.muted, current.volume == 0, silencedZeroKey != current.selectionID else { return }
+        let expectedZero = OutputDevice(id: current.id, uid: current.uid, name: current.name,
+            route: current.route, builtInSpeaker: current.builtInSpeaker, volume: 0,
+            muted: current.muted, controllable: current.controllable)
+        let remembered = lastNonZeroSnapshots[current.uid]
+        let snapshot = remembered ?? VolumeSnapshot(values: Array(
+            repeating: Preferences.implicitWatchRestoreVolume,
+            count: max(1, (try? audio.volumeSnapshot(for: current))?.values.count ?? 1)))
+        recovery = RecoveryContext(id: UUID(), zeroDevice: expectedZero, originalVolume: snapshot,
+                                   implicit: true, volumeKnown: remembered != nil)
+        if !implicitWatchLogged {
+            record("implicitWatch", "音量为 0，自动恢复播放监测")
+            implicitWatchLogged = true
+        }
+    }
     // MARK: - Heartbeat
     /// Periodic self-check, driven by the controller's own timer so it never competes with the
     /// deadline scheduler. It re-verifies state even when no system notification arrives, and it

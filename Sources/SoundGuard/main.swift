@@ -95,8 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "signalHasFreshSamples": audio.signalHasFreshSamples,
             "recoveryEndReason": controller.recoveryEndReason ?? "",
             "recoveryContextRetained": controller.recoveryContextRetained,
+            "recoveryImplicit": controller.recoveryImplicit,
             "recoveryMonitoringActive": controller.recoveryMonitoringActive,
             "recoveryConfirmationActive": controller.recoveryConfirmationActive,
+            "zeroWatchSuppressed": controller.zeroWatchSuppressed,
             "lastAction": controller.lastAction,
             "build": AppVersion.build,
             "automaticRetryCount": controller.automaticRetryCount,
@@ -131,7 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .unsupported: return "当前设备不支持软件音量控制"
         case .zero:
             if controller.recoveryConfirmationActive { return "音量为 0，正在确认新的播放活动" }
-            return controller.recoveryMonitoringActive ? "音量为 0，等待新的播放活动" : "音量为 0，检测已休眠"
+            if controller.recoveryMonitoringActive { return "音量为 0，等待新的播放活动" }
+            return controller.zeroWatchSuppressed ? "音量为 0，不再提醒新的播放" : "音量为 0，检测已休眠"
         case .muted: return "系统已静音，检测已休眠"
         case .playing: return "有播放活动，保持当前音量"
         case .waiting(let deadline):
@@ -181,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     @objc func changeSignal(_ sender: NSSwitch) {
         if sender.state == .on {
-            let alert = UI.alert(message: "开启静音流检测？", informative: "会读取受保护设备的系统音频信号，可能出现系统音频录制权限提示。若同时开启恢复提醒，自动归零后继续检测真实有声信号；否则归零后停止。不保存音频；开启后 CPU 开销会增加。权限拒绝或检测异常时停止相应检测，可关闭此选项恢复默认模式。")
+            let alert = UI.alert(message: "开启静音流检测？", informative: "会读取受保护设备的系统音频信号，可能出现系统音频录制权限提示。若同时开启恢复提醒，自动归零后以及音量为 0 的守望期间都会检测真实有声信号；否则归零后停止。不保存音频；开启后 CPU 开销会增加。权限拒绝或检测异常时停止相应检测，可关闭此选项恢复默认模式。")
             alert.addButton(withTitle: "开启"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { sender.state = .off; return }
         }

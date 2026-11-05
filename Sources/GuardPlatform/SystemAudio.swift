@@ -201,6 +201,14 @@ public final class SystemAudio: AudioService {
             $0.activationPolicy == .regular && $0.bundleURL?.standardizedFileURL.path == outerPath
         } ?? application
     }
+    public func volumeSnapshot(for device: OutputDevice) throws -> VolumeSnapshot {
+        let controls = try controls(device.id)
+        let values = try controls.map { try $0.scalar(Float32(0)) }
+        guard !values.isEmpty, values.allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
+            throw GuardError("设备音量无效")
+        }
+        return VolumeSnapshot(values: values)
+    }
     public func zero(_ expected: OutputDevice) throws -> VolumeSnapshot {
         let (current, controls, snapshot) = try preflight { () -> (OutputDevice, [Property], VolumeSnapshot) in
             guard let current = try currentDevice(), current.id == expected.id,

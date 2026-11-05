@@ -190,6 +190,16 @@ func runUIChecks(outputDirectory: URL?) throws {
     let quietViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
     precondition(quietViews.compactMap { $0 as? NSButton }.contains { $0.title == "恢复到 <1%" })
     delegate.recoveryPresenter.close()
+    delegate.recoveryPresenter.show(RecoveryPrompt(id: UUID(), deviceName: "内建扬声器", volume: 0.25,
+                                                  processes: [PlaybackProcess(pid: 0)], timeout: 60,
+                                                  originalVolumeKnown: false))
+    let unknownViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
+    precondition(unknownViews.compactMap { $0 as? NSTextField }.contains {
+        $0.stringValue == "未记录归零前音量，建议 25%"
+    })
+    precondition(unknownViews.compactMap { $0 as? RecoveryVolumeSlider }.contains { $0.integerValue == 25 })
+    precondition(unknownViews.compactMap { $0 as? NSButton }.contains { $0.title == "恢复到 25%" })
+    delegate.recoveryPresenter.close()
     delegate.recoveryPresenter.show(recoveryPrompt)
     delegate.recoveryPresenter.setTracking(true); delegate.recoveryPresenter.expireForTesting()
     precondition(delegate.recoveryPresenter.currentPanel != nil)

@@ -65,7 +65,7 @@ extension AppDelegate {
         let input = UI.stack([field, UI.label("分钟", size: 12), NSButton(title: "应用", target: self, action: #selector(applyMinutes))], vertical: false, spacing: 7)
         let delay = UI.row(title: "空闲时长", detail: "停止播放后等待 1–120 分钟。", control: input)
         let signal = UI.row(title: "静音流也计时", detail: "进一步识别持续输出、但内容全为静音的音频流。", control: toggle("静音流也计时", on: p.detectSilentStream, action: #selector(changeSignal(_:))))
-        let recovery = UI.row(title: "播放时提示恢复", detail: "仅在声音守卫自动归零后，发现新的播放活动时提示。", control: toggle("播放时提示恢复", on: p.recoveryPromptEnabled, action: #selector(changeRecoveryPrompt(_:))))
+        let recovery = UI.row(title: "播放时提示恢复", detail: "自动归零后以及音量为 0 期间，发现新的播放活动时提示。", control: toggle("播放时提示恢复", on: p.recoveryPromptEnabled, action: #selector(changeRecoveryPrompt(_:))))
         let useMinutes = p.recoveryPromptSeconds >= 60 && p.recoveryPromptSeconds % 60 == 0
         let recoveryField = NSTextField(string: String(useMinutes ? p.recoveryPromptSeconds / 60 : p.recoveryPromptSeconds))
         recoveryField.alignment = .center; recoveryField.widthAnchor.constraint(equalToConstant: 48).isActive = true
@@ -102,13 +102,13 @@ extension AppDelegate {
             UI.section("进阶检测"), UI.group([signal]),
             UI.label("默认关闭。开启后读取系统音频信号，需要相应权限并增加运行开销。若同时开启恢复提醒，自动归零后会继续分析信号，区分静音流与真正有声；否则归零后停止检测。", size: 12, color: .secondaryLabelColor),
             UI.section("音量恢复提醒"), UI.group([recovery, confirmation, recoveryDelay, permission]),
-            UI.label("此功能默认关闭。开启后，只有由声音守卫自动归零时才保存本次原音量；手动归零不提示。恢复前会再次核对设备和音量。", size: 12, color: .secondaryLabelColor),
+            UI.label("此功能默认关闭。开启后，音量为 0 期间自动守望新的播放活动：由本 App 归零的记住原音量，其他情况沿用该设备上次非零音量，未记录时建议恢复 25%。“保持静音，不再提醒”或手动归零后停止守望，直到音量离开 0。恢复前会再次核对设备和音量。", size: 12, color: .secondaryLabelColor),
             UI.section("启动"), UI.group([login])
         ], spacing: 12)
     }
     @objc func changeRecoveryPrompt(_ sender: NSSwitch) {
         if sender.state == .on {
-            let alert = UI.alert(message: "开启播放恢复提醒？", informative: "自动归零后，默认模式保留播放事件监听；若已开启静音流检测，则继续分析信号以避免静音误报。检测到新的播放时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。")
+            let alert = UI.alert(message: "开启播放恢复提醒？", informative: "自动归零后以及音量为 0 期间（未选择保持静音时），默认模式保留播放事件监听；若已开启静音流检测，则继续分析信号以避免静音误报。检测到新的播放时显示确认窗口，只有点击恢复按钮才会提高音量。为定位播放 App 所在显示器，下一步会请求辅助功能权限；拒绝后改用鼠标所在显示器，自动归零不受影响。")
             alert.addButton(withTitle: "开启并继续"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { sender.state = .off; return }
         }

@@ -179,7 +179,8 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
         self.resetButton = reset
         let endpoints = UI.stack([UI.label("1%", size: 11, color: .secondaryLabelColor), NSView(),
                                   UI.label("100%", size: 11, color: .secondaryLabelColor)], vertical: false)
-        let original = UI.stack([UI.label("归零前 \(originalVolumeText)", size: 11, color: .secondaryLabelColor),
+        let originalText = prompt.originalVolumeKnown ? "归零前 \(originalVolumeText)" : "未记录归零前音量，建议 \(originalVolumeText)"
+        let original = UI.stack([UI.label(originalText, size: 11, color: .secondaryLabelColor),
                                  NSView(), reset], vertical: false)
         let controls = UI.stack([slider, endpoints, original], spacing: 3)
         for row in [endpoints, original] { row.widthAnchor.constraint(equalTo: controls.widthAnchor).isActive = true }
