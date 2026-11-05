@@ -12,6 +12,8 @@
 
 用户要求安装本机：已退出运行中的 v0.4.2 并备份至 local-results（不入库），将 v0.4.3 / build 19 安装至 `/Applications/Sound Guard.app`。安装版严格验签通过，安装后二进制与发行构建 SHA256 一致（`757429b6af47cb3e02eab2e1861b16e5e2cc95bc23490d9a4a73da1741862b87`）；`--status` 确认运行版本 0.4.3 / build 19、`automaticRecoveryArmed=true`、`sustainedFault` 为空。`preferences.v1` 安装前后字节一致（导出 SHA256 `83ff0f93c98e8bc1c2aed4b4280b1cc6a807993dabc1b624d17f3a6c706836b3`，仅为本机此次一致性证据）。未修改音量、TCC 或登录项。
 
+本轮源码提交 `b1806cb` 按用户要求推送至 main，GitHub Actions `macOS checks` [run 41954701359](https://github.com/wlzh/sound-guard-mac/actions/runs/41954701359) 通过（validate 1m18s）。未发布公开 Release，本地发行包不等于公开附件。
+
 ## v0.4.2 历史结果
 
 当时 118 项回归、567 次断言通过。新增 10 项控制器和 1 项 C 摘要测试，覆盖归零取消、写前读取重试、手动归零拒绝/冷却、失效恢复清理、恢复写前重试、无通知健康预算、例外播放预算和停止再启动；完整列表见源码注册。另扩充非 `.app` 父路径反例及原生 UI 冷却禁用检查。
