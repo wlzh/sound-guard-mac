@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 
 public protocol AudioService: AnyObject {
@@ -34,6 +35,9 @@ public final class GuardController {
     public private(set) var monitorActive = false
     public private(set) var recoveryMonitoringActive = false
     public private(set) var recoveryEndReason: String?
+    public private(set) var sustainedFaultMessage: String?
+    /// Detection faults self-heal automatically; only latched volume-write faults need a manual retry.
+    public var automaticRecoveryArmed: Bool { running && writeFault == nil }
     public var recoveryPromptID: UUID? { retryPending || recovery?.promptInvalidated == true ? nil : recovery?.id }
     public var recoveryContextRetained: Bool { recovery != nil }
     public var recoveryConfirmationActive: Bool { recovery?.candidateSince != nil }
@@ -50,8 +54,14 @@ public final class GuardController {
     private var healthySince: TimeInterval?
     private var awaitingHealthy = false
     private var phase = "start"
+    private var heartbeatTimer: DispatchSourceTimer?
+    private var sustainedFaultCycles = 0
     private static let automaticDelays: [TimeInterval] = [3, 10, 30]
     private static let retryCooldown: TimeInterval = 3
+    /// Periodic self-check cadence: re-verifies state without notifications and rebuilds latched detection faults.
+    private static let heartbeatInterval: TimeInterval = 30
+    /// Breadcrumb cadence for a fault that keeps coming back after every watchdog rebuild.
+    private static let sustainedFaultLogEvery = 20
     private struct RecoveryContext {
         let id: UUID
         let zeroDevice: OutputDevice
@@ -69,15 +79,19 @@ public final class GuardController {
     public func start() {
         guard !running else { return }
         detectionFault = nil; automaticRetryCount = 0; healthySince = nil; awaitingHealthy = false
+        sustainedFaultMessage = nil; sustainedFaultCycles = 0
         running = true
         audio.onChange = { [weak self] in self?.refresh() }
+        startHeartbeat()
         do { try audio.start(); refresh() } catch { fail(error) }
     }
     public func stop() {
         record("stop", "应用退出")
         running = false; retryPending = false; invalidate(); audio.onChange = nil; audio.stop(); monitorActive = false
         recoveryMonitoringActive = false; recovery = nil; retryDeadline = nil; automaticRetryPending = false
+        stopHeartbeat(); sustainedFaultMessage = nil; sustainedFaultCycles = 0
     }
+    deinit { stopHeartbeat() }
     public func configure(_ value: Preferences) {
         let detectionModeChanged = value.detectSilentStream != preferences.detectSilentStream
         let confirmationChanged = value.recoveryPlaybackConfirmationMilliseconds != preferences.recoveryPlaybackConfirmationMilliseconds
@@ -343,6 +357,40 @@ public final class GuardController {
         policy.reset(); refresh()
     }
     private func invalidate() { generation += 1; scheduler.cancel() }
+    // MARK: - Heartbeat
+    /// Periodic self-check, driven by the controller's own timer so it never competes with the
+    /// deadline scheduler. It re-verifies state even when no system notification arrives, and it
+    /// rebuilds a latched detection fault automatically instead of waiting for a manual retry.
+    public func heartbeat() {
+        guard running, !sleeping, preferences.enabled, writeFault == nil else { return }
+        if detectionFault != nil { rebuildFromLatchedFault(); return }
+        if !retryPending { refresh() }
+    }
+    private func rebuildFromLatchedFault() {
+        let message = detectionFault ?? ""
+        if sustainedFaultMessage != message {
+            sustainedFaultMessage = message; sustainedFaultCycles = 0
+            record("watchdogRetry", "检测故障未恢复，自动重建：\(message)")
+        } else {
+            sustainedFaultCycles += 1
+            if sustainedFaultCycles % Self.sustainedFaultLogEvery == 0 {
+                record("watchdogRetry", "检测故障已持续，第 \(sustainedFaultCycles) 次自动重建：\(message)")
+            }
+        }
+        detectionFault = nil; automaticRetryCount = 0
+        restartAudio(after: 0)
+    }
+    private func startHeartbeat() {
+        stopHeartbeat()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + Self.heartbeatInterval, repeating: Self.heartbeatInterval,
+                       leeway: .seconds(1))
+        timer.setEventHandler { [weak self] in self?.heartbeat() }
+        heartbeatTimer = timer; timer.resume()
+    }
+    private func stopHeartbeat() {
+        heartbeatTimer?.setEventHandler {}; heartbeatTimer?.cancel(); heartbeatTimer = nil
+    }
     private func restartAudio(after delay: TimeInterval, preservingRecovery: Bool = false) {
         guard running else { return }
         retryPending = delay > 0
@@ -366,14 +414,21 @@ public final class GuardController {
         }
     }
     private func fail(_ error: Error) {
-        recordFault(error)
+        // A fault the watchdog keeps rebuilding repeats identically; keep lastFault fresh but log sparsely.
+        let sustained = sustainedFaultMessage == error.localizedDescription
+        if sustained {
+            lastFault = DiagnosticEvent(kind: "fault", phase: phase, message: error.localizedDescription,
+                                        attempt: automaticRetryCount)
+        } else {
+            recordFault(error)
+        }
         if let healthySince, now() - healthySince >= 60 { automaticRetryCount = 0 }
         healthySince = nil
         if writeFault == nil, (error as? GuardError)?.retryable == true,
            running, !sleeping, preferences.enabled, automaticRetryCount < Self.automaticDelays.count {
             let delay = Self.automaticDelays[automaticRetryCount]
             automaticRetryCount += 1; automaticRetryPending = true; awaitingHealthy = true
-            record("automaticRetry", "\(Int(delay)) 秒后自动重建检测")
+            if !sustained { record("automaticRetry", "\(Int(delay)) 秒后自动重建检测") }
             restartAudio(after: delay, preservingRecovery: true)
             return
         }
@@ -389,6 +444,7 @@ public final class GuardController {
         if awaitingHealthy { record("recovered", "状态核验已完成；未自动恢复音量"); awaitingHealthy = false }
         if healthySince == nil { healthySince = now() }
         if now() - healthySince! >= 60 { automaticRetryCount = 0 }
+        sustainedFaultMessage = nil; sustainedFaultCycles = 0
     }
     private func recordFault(_ error: Error) {
         let event = DiagnosticEvent(kind: "fault", phase: phase, message: error.localizedDescription,

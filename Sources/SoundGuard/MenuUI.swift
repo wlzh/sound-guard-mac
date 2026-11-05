@@ -8,10 +8,13 @@ extension AppDelegate {
         let device = displayDevice
         var detail = device?.name ?? "连接输出设备后自动核对"
         var volume = device.flatMap { $0.controllable && $0.volume.isFinite ? "\(Int(max(0, min(1, $0.volume)) * 100))%" : nil }
-        if case .fault(let message) = displayState { detail = message; volume = nil }
+        if case .fault(let message) = displayState {
+            detail = message + (controller.automaticRecoveryArmed ? "；将自动重试" : "")
+            volume = nil
+        }
         if case .retrying = displayState {
             detail = controller.automaticRetryPending
-                ? "检测暂时中断，自动重试 \(controller.automaticRetryCount)/3"
+                ? "检测暂时中断，自动重试第 \(max(1, controller.automaticRetryCount)) 次"
                 : "等待系统音频资源释放"
             volume = nil
         }

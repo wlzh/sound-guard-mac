@@ -90,6 +90,18 @@ public final class SystemAudio: AudioService {
     public func currentDevice() throws -> OutputDevice? {
         let id = try Property(system, kAudioHardwarePropertyDefaultOutputDevice).scalar(UInt32(0))
         guard id != 0 else { outputListeners.clear(); return nil }
+        do {
+            return try outputDevice(id)
+        } catch {
+            // The default device can vanish between reading its ID and inspecting it during a
+            // route change; re-read the default once and inspect the settled device.
+            guard (error as? GuardError)?.retryable == true else { throw error }
+            let fresh = try Property(system, kAudioHardwarePropertyDefaultOutputDevice).scalar(UInt32(0))
+            guard fresh != 0, fresh != id else { throw error }
+            return try outputDevice(fresh)
+        }
+    }
+    private func outputDevice(_ id: UInt32) throws -> OutputDevice {
         let device = try inspect(id)
         var watch = Set(try controls(id))
         for selector in [kAudioDevicePropertyMute, kAudioDevicePropertyDataSource,

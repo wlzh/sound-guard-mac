@@ -101,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             "build": AppVersion.build,
             "automaticRetryCount": controller.automaticRetryCount,
             "automaticRetryPending": controller.automaticRetryPending,
+            "automaticRecoveryArmed": controller.automaticRecoveryArmed,
+            "sustainedFault": controller.sustainedFaultMessage ?? "",
             "retryRemainingSeconds": controller.retryDeadline.map { max(0, $0 - ProcessInfo.processInfo.systemUptime) } ?? 0]
         if let fault = controller.lastFault ?? diagnosticJournal.events.last(where: { $0.kind == "fault" }),
            let data = try? JSONEncoder().encode(fault), let json = try? JSONSerialization.jsonObject(with: data) {
@@ -134,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .playing: return "有播放活动，保持当前音量"
         case .waiting(let deadline):
             return "播放空闲，约 \(max(1, Int(ceil((deadline - ProcessInfo.processInfo.systemUptime) / 60)))) 分钟后归零"
-        case .fault(let message): return "保护异常：" + message
+        case .fault(let message): return "保护异常：" + message + (controller.automaticRecoveryArmed ? "；将自动重试" : "")
         }
     }
     func save(_ p: Preferences) {

@@ -55,10 +55,14 @@ struct Property: Hashable {
 }
 
 public enum AudioErrorClassification {
+    /// 'who?' — the HAL no longer recognizes the object, typically a stale default-device ID read
+    /// while a route change removes that device. The next read returns the settled device.
+    public static let staleObjectError: OSStatus = 0x77686F3F
     public static func isTransient(_ status: OSStatus) -> Bool {
         [kAudioHardwareBadObjectError, kAudioHardwareBadDeviceError,
                          kAudioHardwareBadStreamError, kAudioHardwareNotRunningError,
-                         kAudioHardwareNotReadyError, kAudioHardwareUnspecifiedError].contains(status)
+                         kAudioHardwareNotReadyError, staleObjectError,
+                         kAudioHardwareUnspecifiedError].contains(status)
     }
 }
 func check(_ status: OSStatus, _ operation: String) throws {

@@ -150,7 +150,8 @@ final class PolicyTests: XCTestCase {
     }
     func testAudioErrorRetryClassification() {
         for status in [kAudioHardwareBadObjectError, kAudioHardwareBadDeviceError,
-                       kAudioHardwareNotRunningError, kAudioHardwareNotReadyError] {
+                       kAudioHardwareNotRunningError, kAudioHardwareNotReadyError,
+                       AudioErrorClassification.staleObjectError] {
             XCTAssertTrue(AudioErrorClassification.isTransient(status))
         }
         for status in [noErr, kAudioDevicePermissionsError, kAudioHardwareUnsupportedOperationError,
@@ -350,6 +351,76 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(audio.writes, 0); XCTAssertEqual(audio.restoreWrites, 0)
         audio.failStart = false; controller.retry(); time = 46; scheduler.action?()
         XCTAssertEqual(controller.state, .waiting(346)); XCTAssertEqual(controller.automaticRetryCount, 0)
+    }
+    func testWatchdogRebuildsLatchedDetectionFault() {
+        audio.failRead = true; controller.start()
+        XCTAssertEqual(controller.state, .fault("read")); XCTAssertNil(scheduler.action)
+        XCTAssertEqual(controller.lastFault?.message, "read")
+        audio.failRead = false
+        controller.heartbeat()
+        XCTAssertEqual(controller.state, .waiting(300)); XCTAssertEqual(controller.automaticRetryCount, 0)
+        XCTAssertEqual(audio.starts, 2); XCTAssertNotNil(audio.monitored)
+        XCTAssertNil(controller.sustainedFaultMessage)
+    }
+    func testHeartbeatRechecksDormantStatesWithoutNotifications() {
+        audio.device = speaker(0); controller.start()
+        XCTAssertEqual(controller.state, .zero); XCTAssertNil(audio.monitored)
+        audio.device = speaker()  // volume raised with no listener callback (silent notification loss)
+        controller.heartbeat()
+        XCTAssertEqual(controller.state, .waiting(300)); XCTAssertTrue(controller.monitorActive)
+        XCTAssertNotNil(audio.monitored); XCTAssertEqual(audio.writes, 0)
+        audio.activity = .playing; audio.onChange?()
+        XCTAssertEqual(controller.state, .playing)
+        audio.activity = .idle; time = 350  // playback stopped with no listener callback
+        controller.heartbeat()
+        XCTAssertEqual(controller.state, .waiting(650))
+    }
+    func testHeartbeatSkipsDuringWriteFaultPauseSleepAndCooldown() {
+        for phase in 0...3 {
+            tearDown(); setUp(); controller.start()
+            var expected: GuardState = .waiting(300)
+            if phase == 0 {
+                audio.failWrite = true; time = 300; scheduler.action?()
+                expected = .fault("write")
+            } else if phase == 1 {
+                var p = Preferences(); p.enabled = false; controller.configure(p); expected = .paused
+            } else if phase == 2 {
+                controller.setSleeping(true); expected = .sleeping
+            } else {
+                controller.retry(); expected = .retrying
+            }
+            let cooldownDeadline = scheduler.deadline
+            let startsBefore = audio.starts
+            audio.device = speaker(0.6)
+            controller.heartbeat()
+            XCTAssertEqual(controller.state, expected)
+            XCTAssertEqual(audio.starts, startsBefore)
+            if phase == 3 { XCTAssertEqual(scheduler.deadline, cooldownDeadline) }
+        }
+    }
+    func testSustainedFaultWatchdogKeepsRebuildingWithThrottledDiagnostics() {
+        var events: [DiagnosticEvent] = []; controller.onDiagnostic = { events.append($0) }
+        audio.failRead = true; controller.start()
+        XCTAssertEqual(events.filter { $0.kind == "fault" }.count, 1)
+        for _ in 0..<20 { controller.heartbeat() }
+        XCTAssertEqual(events.filter { $0.kind == "fault" }.count, 1)
+        XCTAssertEqual(events.filter { $0.kind == "watchdogRetry" }.count, 1)
+        XCTAssertEqual(controller.state, .fault("read"))
+        XCTAssertEqual(controller.sustainedFaultMessage, "read")
+        XCTAssertEqual(audio.starts, 21); XCTAssertEqual(audio.writes, 0)
+        controller.heartbeat()
+        XCTAssertEqual(events.filter { $0.kind == "watchdogRetry" }.count, 2)
+        audio.failRead = false; controller.heartbeat()
+        XCTAssertEqual(controller.state, .waiting(300)); XCTAssertNil(controller.sustainedFaultMessage)
+    }
+    func testHeartbeatPreservesRecoveryConfirmationDeadline() {
+        armRecovery()
+        audio.sources = [PlaybackProcess(pid: 1)]; audio.onChange?()
+        XCTAssertEqual(scheduler.deadline, 302); XCTAssertTrue(controller.recoveryConfirmationActive)
+        controller.heartbeat()
+        XCTAssertEqual(scheduler.deadline, 302); XCTAssertTrue(controller.recoveryConfirmationActive)
+        time = 302; scheduler.action?()
+        XCTAssertTrue(controller.recoveryContextRetained); XCTAssertEqual(audio.restoreWrites, 0)
     }
     func testZeroCancellationReconcilesWithoutFaultLatch() {
         for changed in [speaker(0.2), speaker(id: 2)] {
@@ -1119,6 +1190,11 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
         ("retry changed settings", controllerTests.testRetrySettingsChangeConsumesContext),
         ("retry sleep retained context", controllerTests.testRetrySleepAndStopDiscardRetainedContext),
         ("retry retained failure", controllerTests.testRetryFailureDiscardsRetainedContext),
+        ("watchdog rebuild", controllerTests.testWatchdogRebuildsLatchedDetectionFault),
+        ("heartbeat dormant recheck", controllerTests.testHeartbeatRechecksDormantStatesWithoutNotifications),
+        ("heartbeat skip matrix", controllerTests.testHeartbeatSkipsDuringWriteFaultPauseSleepAndCooldown),
+        ("sustained fault throttling", controllerTests.testSustainedFaultWatchdogKeepsRebuildingWithThrottledDiagnostics),
+        ("heartbeat recovery deadline", controllerTests.testHeartbeatPreservesRecoveryConfirmationDeadline),
         ("retry device safety matrix", controllerTests.testRetryRejectsRouteMuteMissingAndUncontrollable),
         ("retry lifecycle safety matrix", controllerTests.testRetryDisabledSettingsAndStopCannotResurrectRecovery),
         ("retry failure safety matrix", controllerTests.testRetryRecoveryMonitorAndReadFailuresReleaseContext),
