@@ -229,5 +229,17 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.about?.close(); delegate.settings?.close()
     precondition(delegate.about == nil && delegate.settings == nil && delegate.settingsFeedback == nil)
     precondition(UserDefaults.standard.data(forKey: "preferences.v1") == originalPreferences)
+    let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    statusItem.button?.image = BrandAssets.mark()
+    delegate.status = statusItem
+    delegate.attachStatusTooltip(to: statusItem.button)
+    delegate.updateStatus()
+    precondition(statusItem.button?.toolTip == nil)
+    precondition(delegate.statusTooltip?.view(statusItem.button!, stringForToolTip: 0, point: .zero, userData: nil) == "声音守卫：" + delegate.stateText)
+    precondition(statusItem.button?.accessibilityHelp() == "声音守卫：" + delegate.stateText)
+    delegate.updateStatus()
+    precondition(statusItem.button?.toolTip == nil)
+    delegate.status = nil
+    NSStatusBar.system.removeStatusItem(statusItem)
     print("UI_CHECKS=PASS; PREFERENCES_ISOLATED=PASS; PREVIEWS=SYNTHETIC; MENU_PREVIEW=STRUCTURE_NOT_OS_SCREENSHOT")
 }

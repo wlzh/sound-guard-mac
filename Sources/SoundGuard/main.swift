@@ -10,6 +10,16 @@ let statusDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userD
 
 final class SettingsDocument: NSView { override var isFlipped: Bool { true } }
 
+/// Help-tag text is answered at display time so the tag is registered exactly once.
+/// Reassigning the property-based tooltip while the tag is on screen (state refreshes every
+/// heartbeat, audio event and confirmation tick) detaches it and makes it follow the cursor.
+final class StatusTooltipProvider: NSObject, NSViewToolTipOwner {
+    let text: () -> String
+    init(text: @escaping () -> String) { self.text = text }
+    func attach(to view: NSView) { view.addToolTip(view.bounds, owner: self, userData: nil) }
+    func view(_ view: NSView, stringForToolTip tooltip: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String { text() }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     let audio = SystemAudio()
     let defaults: UserDefaults
@@ -20,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     lazy var controller = GuardController(audio: audio, scheduler: DeadlineScheduler(),
         preferences: Preferences.decode(defaults.data(forKey: "preferences.v1")))
     var status: NSStatusItem!
+    var statusTooltip: StatusTooltipProvider?
     var settings: NSWindow?
     var about: NSWindow?
     var minutesField: NSTextField?
@@ -53,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.image = BrandAssets.mark()
         status.button?.setAccessibilityLabel("声音守卫：声波盾牌")
+        attachStatusTooltip(to: status.button)
         let menu = NSMenu(); menu.delegate = self; status.menu = menu
         controller.onUpdate = { [weak self] in self?.updateStatus() }
         recoveryPresenter.onRestore = { [weak self] prompt, targetPercent in
@@ -116,8 +128,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         } catch { /* On-demand diagnostics must never affect protection. */ }
     }
+    func attachStatusTooltip(to view: NSView?) {
+        guard let view else { return }
+        let provider = StatusTooltipProvider(text: { [weak self] in "声音守卫：" + (self?.stateText ?? "") })
+        provider.attach(to: view)
+        statusTooltip = provider
+    }
     func updateStatus() {
-        status?.button?.toolTip = "声音守卫：" + stateText
+        status?.button?.setAccessibilityHelp("声音守卫：" + stateText)
         if let visible = recoveryPresenter.currentPromptID, controller.recoveryPromptID != visible {
             recoveryPresenter.close()
         }
