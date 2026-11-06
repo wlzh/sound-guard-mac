@@ -12,6 +12,8 @@
 
 用户要求安装本机：已退出运行中的 v0.4.4 并备份至 local-results（不入库），将 v0.4.5 / build 21 安装至 `/Applications/Sound Guard.app`。安装版严格验签通过，安装后二进制与发行构建 SHA256 一致（`fbd693748b8561bf0530a75dcb00454b71f36289c61159a3a1dc8506f6f21858`）；启动后 `--status` 确认版本 0.4.5 / build 21，且启动即音量 0 场景 `recoveryImplicit=true`、`recoveryMonitoringActive=true`、`signalActive=true` 且有新鲜样本——零音量守望在位，正是用户报告提示跟随光标时所处的状态。`preferences.v1` 安装前后导出 SHA256 一致（`d20e96ee790d12444e6d878f25d08c817f31e5c7ba76fc8bb7ea30d3113fd096`，仅为本机此次一致性证据）。未修改音量、TCC 或登录项。
 
+本轮源码提交 `db40572` 与 CI 运行器修复 `26cac2d` 按用户要求推送至 main。`db40572` 的首次远端运行因 GitHub 当日下线 macos-14 arm64 镜像被取消（1 秒 cancelled）；工作流改用 macos-15 后 GitHub Actions `macOS checks` [run 42207521465](https://github.com/wlzh/sound-guard-mac/actions/runs/42207521465) 通过（validate 1m38s，完整 package-release 门禁）。未发布公开 Release，本地发行包不等于公开附件。
+
 ## v0.4.4 历史结果
 
 当前 129 项回归、670 次断言通过：29 项策略/偏好/诊断、86 项注入控制器、7 项信号健康、5 项 C 摘要、2 项 Tap 配置测试。新增 6 项控制器测试，覆盖恢复记录作废后零音量守望自动重武装并完整走通弹窗与恢复、保持静音抑制守望直至音量离开 0、手动归零抑制与解除、未记录原音量时建议 25% 的端到端恢复、守望资格矩阵（静音/名单外/不可控/功能关闭/保护暂停），以及守望凭据自身的失效复核；既有“设备或路由变化后无凭据、无监听”断言按新行为更新为“旧凭据失效且旧请求拒绝 + 隐式守望在位”。默认设置的守望建议音量 25% 纳入策略测试。
