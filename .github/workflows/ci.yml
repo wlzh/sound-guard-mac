@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Tests, documentation, Universal app, signature and archive
