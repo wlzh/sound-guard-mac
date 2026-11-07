@@ -131,8 +131,11 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
     }
     private var prompt: RecoveryPrompt?
     private var countdown: NSTextField?
+    /// App identity offered by this prompt's "不再提醒" link; nil when the source cannot be identified.
+    private var ignoreDescriptor: IgnoredRecoveryApp?
     var onRestore: ((RecoveryPrompt, Int?) -> Void)?
     var onKeepSilent: ((RecoveryPrompt) -> Void)?
+    var onIgnoreApp: ((RecoveryPrompt, IgnoredRecoveryApp) -> Void)?
     var currentPanel: NSPanel? { panel }
     var currentPromptID: UUID? { prompt?.id }
 
@@ -151,12 +154,28 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
             closeButton.setAccessibilityLabel("暂时关闭恢复提示；下次播放仍会提醒")
         }
 
-        let appName = PlaybackScreenLocator.appName(for: prompt.processes)
+        let descriptor = prompt.processes.compactMap { PlaybackScreenLocator.appDescriptor(for: $0) }.first
+        ignoreDescriptor = descriptor
+        let appName = descriptor?.name ?? PlaybackScreenLocator.appName(for: prompt.processes)
         let eyebrow = UI.label("声音守卫 · 播放保护", size: 11, weight: .medium, color: .secondaryLabelColor)
+        var sourceLine: NSView = UI.label("\(appName) 已开始播放", size: 12, color: .secondaryLabelColor)
+        if let descriptor {
+            let sourceLabel = UI.label("\(appName) 已开始播放", size: 12, color: .secondaryLabelColor)
+            sourceLabel.maximumNumberOfLines = 1; sourceLabel.lineBreakMode = .byTruncatingTail
+            sourceLabel.cell?.truncatesLastVisibleLine = true; sourceLabel.cell?.wraps = false
+            sourceLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            sourceLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let ignore = UI.link("不再提醒", target: self, action: #selector(ignoreApp))
+            ignore.setAccessibilityLabel("不再提醒 \(descriptor.name) 的播放")
+            ignore.toolTip = "把「\(descriptor.name)」加入恢复提示例外名单：本提示关闭、音量保持 0，该 App 今后播放不再提醒；可在设置的“恢复提示应用”中移除。"
+            let row = UI.stack([sourceLabel, NSView(), ignore], vertical: false, spacing: 6)
+            row.widthAnchor.constraint(lessThanOrEqualToConstant: 326).isActive = true
+            sourceLine = row
+        }
         let heading = UI.stack([
             UI.image(BrandAssets.icon(size: 42), size: 42),
             UI.stack([eyebrow, UI.label("要恢复声音吗？", size: 17, weight: .semibold),
-                      UI.label("\(appName) 已开始播放", size: 12, color: .secondaryLabelColor)], spacing: 3)
+                      sourceLine], spacing: 3)
         ], vertical: false, spacing: 12)
         let originalPercent = Int((prompt.volume * 100).rounded())
         let volume = UI.label(originalVolumeText, size: 24, weight: .semibold)
@@ -252,6 +271,10 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
         guard let prompt else { close(); return }
         close(); onKeepSilent?(prompt)
     }
+    @objc private func ignoreApp() {
+        guard let prompt, let descriptor = ignoreDescriptor else { close(); return }
+        close(); onIgnoreApp?(prompt, descriptor)
+    }
     @objc private func restore() {
         guard let prompt else { close(); return }
         let target = selectedPercent
@@ -266,6 +289,6 @@ final class RecoveryPromptPresenter: NSObject, NSWindowDelegate {
     }
     private func clearSelection() {
         prompt = nil; countdown = nil; trackingStarted = nil; selectedPercent = nil
-        slider = nil; volumeLabel = nil; restoreButton = nil; resetButton = nil
+        slider = nil; volumeLabel = nil; restoreButton = nil; resetButton = nil; ignoreDescriptor = nil
     }
 }

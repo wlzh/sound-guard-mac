@@ -172,7 +172,7 @@ extension AppDelegate {
         applications.setAccessibilityLabel("从 Applications 选择忽略应用")
         return UI.stack([
             UI.section("恢复提示例外"),
-            UI.label("仅抑制自动归零后的恢复窗口，不阻止应用播放，也不影响自动归零。加入外层 App 时，也包含其包内运行的子 App；无法识别的播放来源仍会提示。", size: 12, color: .secondaryLabelColor),
+            UI.label("仅抑制自动归零后的恢复窗口，不阻止应用播放，也不影响自动归零。加入外层 App 时，也包含其包内运行的子 App；无法识别的播放来源仍会提示。恢复提示中的“不再提醒”也会把该 App 加入此名单。", size: 12, color: .secondaryLabelColor),
             UI.group(rows),
             UI.stack([current, running, applications], spacing: 8)
         ], spacing: 12)

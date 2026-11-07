@@ -1,8 +1,18 @@
 # 测试状态与发布门禁
 
-版本：0.4.5，build 21。2026-11-06 自动化更新；历史硬件证据来自 macOS 15.6 / Apple Silicon。开发预览，不是全部实机验收通过。
+版本：0.4.6，build 22。2026-11-07 自动化更新；历史硬件证据来自 macOS 15.6 / Apple Silicon。开发预览，不是全部实机验收通过。
 
-## v0.4.5 本轮结果
+## v0.4.6 本轮结果
+
+当前 129 项回归、670 次断言通过：29 项策略/偏好/诊断、86 项注入控制器、7 项信号健康、5 项 C 摘要、2 项 Tap 配置测试。本轮为恢复弹窗例外入口（UI 与偏好写入，控制器零改动），不新增注入回归、不改行为断言；覆盖由原生 UI 自检承担：带 bundleId 的合成进程弹出时断言“Player 已开始播放”与“不再提醒”存在、面板仍 420×350，点击后回调携带正确身份且未触发恢复/保持静音，`ignoreRecoveryApp` 重复调用仅写入一条，无来源（pid 0 无身份）时不显示链接；另有渲染预览像素级比对确认与既有浅色弹窗差异仅限来源行（第 66–78 行像素），底部按钮区逐字节一致。
+
+本轮 `zsh scripts/test-all.sh` 完整门禁通过：129 项 / 670 次断言、debug 编译、隔离偏好的原生 UI 自检（含新增例外链接检查）、Markdown 链接/版本/验收编号/测试注册（DOCS_CHECK=PASS，ACCEPTANCE=34）及 `git diff --check`。真实 App 触发弹窗并点击“不再提醒”的实机验收（A30）不因 UI 自检通过宣称通过；发行打包与本机安装见下。
+
+`zsh scripts/package-release.sh` 发行验证通过：Universal arm64/x86_64、严格 ad-hoc 验签、Info.plist 版本 0.4.6 / build 22、ZIP 自检与版本专用 SHA256（`7b79af73f27780cc687412c6163df1b51d9ac688b42d3e8129ea087cd9b62b2c`，仅为本机此次构建证据）。
+
+用户要求安装本机：已退出运行中的 v0.4.5 并备份至 local-results（不入库），将 v0.4.6 / build 22 安装至 `/Applications/Sound Guard.app`。安装版严格验签通过，安装后二进制与发行构建 SHA256 一致（`1478dfd01929c7d75c8a4e38bbe4879bc87dd70243e4862199eb144be7f08f65`）；启动后 `--status` 确认版本 0.4.6 / build 22，零音量守望在位（`recoveryImplicit=true`、`recoveryMonitoringActive=true`）。`preferences.v1` 安装前后导出 SHA256 一致，既有例外名单原样保留（格式未变）。未修改音量、TCC 或登录项。
+
+## v0.4.5 历史结果
 
 当前 129 项回归、670 次断言通过：29 项策略/偏好/诊断、86 项注入控制器、7 项信号健康、5 项 C 摘要、2 项 Tap 配置测试。本轮为 UI 机制修复（状态栏悬停提示跟随光标），不新增注入回归、不改行为断言；覆盖由原生 UI 自检承担：新增状态提示机制检查（构造真实 NSStatusItem 走 attachStatusTooltip 同一路径，断言属性式 toolTip 未安装、动态回调返回“声音守卫：+stateText”、AXHelp 随 updateStatus 同步、连续刷新不回退），自检结束移除状态栏项。
 

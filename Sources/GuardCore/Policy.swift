@@ -1,8 +1,8 @@
 import Foundation
 
 public enum AppVersion {
-    public static let current = "0.4.5"
-    public static let build = "21"
+    public static let current = "0.4.6"
+    public static let build = "22"
 }
 
 public struct Preferences: Codable, Equatable {

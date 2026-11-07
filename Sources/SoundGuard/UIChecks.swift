@@ -128,6 +128,7 @@ func runUIChecks(outputDirectory: URL?) throws {
     precondition(recoveryViews.compactMap { $0 as? NSImageView }.contains { $0.image != nil })
     let recoveryLabels = recoveryViews.compactMap { $0 as? NSTextField }.map(\.stringValue)
     precondition(recoveryLabels.contains("声音守卫 · 播放保护") && recoveryLabels.contains("要恢复声音吗？") && recoveryLabels.contains("某个 App 已开始播放"))
+    precondition(!recoveryViews.compactMap { $0 as? NSButton }.contains { $0.title == "不再提醒" })
     let recoveryButtons = recoveryViews.compactMap { $0 as? NSButton }.filter {
         ["保持静音，不再提醒", "恢复到 25%"].contains($0.title)
     }
@@ -199,6 +200,23 @@ func runUIChecks(outputDirectory: URL?) throws {
     })
     precondition(unknownViews.compactMap { $0 as? RecoveryVolumeSlider }.contains { $0.integerValue == 25 })
     precondition(unknownViews.compactMap { $0 as? NSButton }.contains { $0.title == "恢复到 25%" })
+    delegate.recoveryPresenter.close()
+    var ignoredDescriptor: IgnoredRecoveryApp?
+    delegate.recoveryPresenter.onIgnoreApp = { _, descriptor in ignoredDescriptor = descriptor }
+    delegate.recoveryPresenter.show(RecoveryPrompt(id: UUID(), deviceName: "内建扬声器", volume: 0.25,
+        processes: [PlaybackProcess(pid: 42, bundleIdentifier: "com.example.Player", name: "Player")], timeout: 60))
+    let ignoreViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
+    precondition(delegate.recoveryPresenter.currentPanel!.frame.size == NSSize(width: 420, height: 350))
+    precondition(ignoreViews.compactMap { $0 as? NSTextField }.contains { $0.stringValue == "Player 已开始播放" })
+    precondition(ignoreViews.compactMap { $0 as? NSButton }.contains { $0.title == "不再提醒" })
+    try render(delegate.recoveryPresenter.currentPanel?.contentView, name: "recovery-prompt-ignore")
+    ignoreViews.compactMap { $0 as? NSButton }.first { $0.title == "不再提醒" }!.performClick(nil)
+    precondition(ignoredDescriptor?.name == "Player" && ignoredDescriptor?.bundleIdentifier == "com.example.Player")
+    precondition(!restored && !keptSilent && delegate.recoveryPresenter.currentPanel == nil)
+    delegate.ignoreRecoveryApp(IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player"))
+    delegate.ignoreRecoveryApp(IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player"))
+    precondition(delegate.controller.preferences.ignoredRecoveryApps.filter { $0.name == "Player" }.count == 1)
+    delegate.recoveryPresenter.onIgnoreApp = nil
     delegate.recoveryPresenter.close()
     delegate.recoveryPresenter.show(recoveryPrompt)
     delegate.recoveryPresenter.setTracking(true); delegate.recoveryPresenter.expireForTesting()

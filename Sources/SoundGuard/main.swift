@@ -74,6 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         recoveryPresenter.onKeepSilent = { [weak self] prompt in
             self?.controller.keepSilent(for: prompt.id)
         }
+        recoveryPresenter.onIgnoreApp = { [weak self] _, descriptor in
+            self?.ignoreRecoveryApp(descriptor)
+        }
         controller.onRecoveryPrompt = { [weak self] prompt in self?.recoveryPresenter.show(prompt) }
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
@@ -162,6 +165,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
     func save(_ p: Preferences) {
         defaults.set(try? JSONEncoder().encode(p), forKey: "preferences.v1"); controller.configure(p)
+    }
+    /// One-click from the recovery prompt: persist the triggering app to the ignore list.
+    /// Saving reconfigures the controller, which invalidates any visible prompt for that app.
+    func ignoreRecoveryApp(_ descriptor: IgnoredRecoveryApp) {
+        var p = controller.preferences
+        guard let identity = descriptor.identity,
+              !p.ignoredRecoveryApps.contains(where: { $0.identity == identity }) else { return }
+        p.ignoredRecoveryApps.append(descriptor)
+        save(p)
     }
     @objc func toggleEnabled() { var p = controller.preferences; p.enabled.toggle(); save(p) }
     @objc func zeroNow() { controller.zeroNow() }
