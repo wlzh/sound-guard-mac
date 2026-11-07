@@ -1171,6 +1171,17 @@ final class MeterTests: XCTestCase {
         XCTAssertTrue(description.processes.isEmpty)
         XCTAssertEqual(description.muteBehavior, .unmuted)
     }
+    func testPlaybackProcessResolvesBareExecutableByPath() {
+        let pid = pid_t(getpid())
+        let process = SystemAudio.playbackProcess(pid: pid)
+        XCTAssertEqual(process.pid, pid)
+        XCTAssertNotNil(process.applicationIdentity)
+        XCTAssertFalse(process.name?.isEmpty ?? true)
+        if process.bundleIdentifier == nil {
+            let entry = IgnoredRecoveryApp(bundleIdentifier: nil, bundlePath: process.bundlePath, name: process.name ?? "未命名进程")
+            XCTAssertTrue(entry.matches(process))
+        }
+    }
     func testSignalStartupGrace() throws {
         var health = SignalHealth(started: 1)
         XCTAssertEqual(try health.evaluate(now: 100, buffer: 0, sound: 0, invalid: false), .starting)
@@ -1347,6 +1358,7 @@ let suites: [(XCTestCase, [(String, () throws -> Void)])] = [
     ]),
     (meterTests, [("aggregate immediate start", meterTests.testAggregateStartsWithoutWaitingForPlayback),
                   ("tap configuration", meterTests.testTapConfigurationDoesNotMuteOrCaptureMicrophone),
+                  ("bare executable identity", meterTests.testPlaybackProcessResolvesBareExecutableByPath),
                   ("signal startup", meterTests.testSignalStartupGrace), ("signal absent", meterTests.testSignalMissingCallbacksFail),
                   ("signal stale", meterTests.testSignalStaleCallbacksFail), ("signal silence", meterTests.testSignalDigitalSilenceTransitions),
                   ("signal delayed poll", meterTests.testSignalShortSoundRetainedAcrossDelayedPoll), ("signal corrupt", meterTests.testSignalInvalidClockAndSamplesFail),

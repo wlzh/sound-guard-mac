@@ -217,6 +217,12 @@ func runUIChecks(outputDirectory: URL?) throws {
     delegate.ignoreRecoveryApp(IgnoredRecoveryApp(bundleIdentifier: "com.example.Player", name: "Player"))
     precondition(delegate.controller.preferences.ignoredRecoveryApps.filter { $0.name == "Player" }.count == 1)
     delegate.recoveryPresenter.onIgnoreApp = nil
+    delegate.recoveryPresenter.show(RecoveryPrompt(id: UUID(), deviceName: "内建扬声器", volume: 0.25,
+        processes: [PlaybackProcess(pid: 4242, bundlePath: "/usr/bin/afplay", name: "afplay")], timeout: 60))
+    let rawPathViews = descendants(delegate.recoveryPresenter.currentPanel!.contentView!)
+    precondition(rawPathViews.compactMap { $0 as? NSTextField }.contains { $0.stringValue == "afplay 已开始播放" })
+    precondition(rawPathViews.compactMap { $0 as? NSButton }.contains { $0.title == "不再提醒" })
+    delegate.recoveryPresenter.close()
     delegate.recoveryPresenter.close()
     delegate.recoveryPresenter.show(recoveryPrompt)
     delegate.recoveryPresenter.setTracking(true); delegate.recoveryPresenter.expireForTesting()

@@ -1,4 +1,5 @@
 import CoreAudio
+import Darwin
 import Foundation
 import AppKit
 import GuardCore
@@ -182,14 +183,23 @@ public final class SystemAudio: AudioService {
         }
         return result
     }
-    private static func playbackProcess(pid: pid_t) -> PlaybackProcess {
-        guard pid > 0, let direct = NSRunningApplication(processIdentifier: pid) else {
-            return PlaybackProcess(pid: pid)
+    /// Bundle apps resolve through LaunchServices; bundleless players (CLI tools, daemons,
+    /// helpers) fall back to their executable path so prompts can name them and ignore by path.
+    public static func playbackProcess(pid: pid_t) -> PlaybackProcess {
+        if pid > 0, let direct = NSRunningApplication(processIdentifier: pid) {
+            let app = outerApplication(for: direct)
+            if app.bundleIdentifier != nil || app.bundleURL != nil {
+                return PlaybackProcess(pid: pid, bundleIdentifier: app.bundleIdentifier,
+                                       bundlePath: app.bundleURL?.standardizedFileURL.path,
+                                       name: app.localizedName ?? app.bundleURL?.lastPathComponent)
+            }
         }
-        let app = outerApplication(for: direct)
-        return PlaybackProcess(pid: pid, bundleIdentifier: app.bundleIdentifier,
-                               bundlePath: app.bundleURL?.standardizedFileURL.path,
-                               name: app.localizedName)
+        guard pid > 0 else { return PlaybackProcess(pid: pid) }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) + 1)
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return PlaybackProcess(pid: pid) }
+        let path = URL(fileURLWithPath: String(cString: buffer)).standardizedFileURL.path
+        guard !path.isEmpty else { return PlaybackProcess(pid: pid) }
+        return PlaybackProcess(pid: pid, bundlePath: path, name: URL(fileURLWithPath: path).lastPathComponent)
     }
     private static func outerApplication(for application: NSRunningApplication) -> NSRunningApplication {
         guard application.activationPolicy != .regular,
